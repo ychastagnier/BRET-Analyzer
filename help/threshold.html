@@ -1,0 +1,17 @@
+<html><h2>Threshold methods</h2>
+Values that are under the calculated threshold are set to 0 to ignore them during further process.
+
+<h4>Auto Threshold</h4>
+The threshold value is calculated once for the whole image.
+
+<h4>Auto Local Threshold</h4>
+The threshold is calculated for each pixel, using the neighboring pixels (in AutoLocalTh radius).
+
+<h4>Median and Mean * Coefficient</h4>
+The threshold is calculated using the median or mean * coefficient of the area selected by the user and applied on whole image.
+
+
+<h2>Other parameters</h2>
+Coefficient is used only with method Mean * Coefficient. The threshold is set to the coefficient value multiplied by the mean intensity value of the area selected.
+AutoLocalTh radius is used only with local threshold methods and determines the area used to calculate the threshold of each pixel.
+Minimum threshold sets the value under which the pixel intensity is set to zero anyway after application of the threshold method selected, if set to a value higher than zero.
