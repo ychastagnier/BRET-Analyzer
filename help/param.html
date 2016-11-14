@@ -1,26 +1,26 @@
 <html><h2>Image naming convention:</h2>
-Donor and acceptor file names should differ only by what's in the Donor and Acceptor fields.
-For example, if files are named <u>Example1-480-test1.tif</u> and <u>Example1-535-test1.tif</u>, Donor field should contain <u>480</u> while Acceptor field should contain <u>535</u>. By following this convention, the acceptor image will automatically be found after selecting the donor image.
+Donor and acceptor file names should differ only by what's in the Donor and Acceptor fields.<br>
+For example, if files are named <u>Example1-480-test1.tif</u> and <u>Example1-535-test1.tif</u>, Donor field should contain <u>480</u> while Acceptor field should contain <u>535</u>. By following this convention, the acceptor image will automatically be found after selecting the donor image.<br>
 
 <h2>Clean parameters:</h2>
-Ticking <u>Batch clean?</u> will change the behavior of <u>Clean</u> tool. The user will choose a folder containing raw images instead of choosing an image. All pairs of Donor/Acceptor detected inside this folder will be processed without user interaction: automatic background removal and stack alignment if ticked.
+Ticking <u>Batch clean?</u> will change the behavior of <u>Clean</u> tool. The user will choose a folder containing raw images instead of choosing an image. All pairs of Donor/Acceptor detected inside this folder will be processed without user interaction: automatic background removal and stack alignment if ticked.<br>
 
 <h2>Crop parameters:</h2>
-Ticking <u>Batch crop?</u> will change the behavior of <u>Crop</u> tool. The user will choose a folder containing clean images instead of choosing an image. All pairs of Donor/Acceptor containing "_clean" detected inside this folder and its subfolders will be processed.
+Ticking <u>Batch crop?</u> will change the behavior of <u>Crop</u> tool. The user will choose a folder containing clean images instead of choosing an image. All pairs of Donor/Acceptor containing "_clean" detected inside this folder and its subfolders will be processed.<br>
 
-If <u>Give a label to CROPs?</u> is ticked, a text file will be generated containing the crop numbers and associated labels.
+If <u>Give a label to CROPs?</u> is ticked, a text file will be generated containing the crop numbers and associated labels.<br>
 
 <h2>Divide parameters:</h2>
 <u>Selection?</u> drop down menu will allow user to change <u>Divide</u> tool behavior:<br>
-- <i>Image: Single</i>: user selects clean image to be processed.
+- <i>Image: Single</i>: user selects clean image to be processed.<br>
 - <i>Image: Multi if CROP</i>: user selects clean image. If the image is a crop, all crops in the same folder will be processed.
-If it's not, the behavior is the same as <i>Image: Single</i>.
-- <i>Folder: CROPs only</i>: user selects a folder. All clean crops contained in the folder and its subfolders will be processed.
-- <i>Folder: All but CROPs</i>: user selects a folder. All clean images that are not crops contained in the folder and its subfolders will be processed.
-- <i>Folder: All</i>: user selects a folder. All clean images contained in the folder and its subfolders will be processed.
+If it's not, the behavior is the same as <i>Image: Single</i>.<br>
+- <i>Folder: CROPs only</i>: user selects a folder. All clean crops contained in the folder and its subfolders will be processed.<br>
+- <i>Folder: All but CROPs</i>: user selects a folder. All clean images that are not crops contained in the folder and its subfolders will be processed.<br>
+- <i>Folder: All</i>: user selects a folder. All clean images contained in the folder and its subfolders will be processed.<br>
 Image naming convention has to be followed for images to be found in the (sub)folders.
 
-Ticking <u>Without confirmation?</u> will use default Divide parameters that follow without letting the user choose values.
+Ticking <u>Without confirmation?</u> will use default Divide parameters that follow without letting the user choose values.<br>
 It allows to quickly process a whole folder without interaction, without guaranty that the same threshold can be applied to all images.
 
 The threshold works as follow: for each image of donor stack, it computes the threshold (area median, area mean * coefficient, or other automatic methods) and put to 0 all pixels for which value is lower.
