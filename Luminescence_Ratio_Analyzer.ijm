@@ -1,4 +1,4 @@
-// Luminescence Ratio Analyzer version 0.26 (2016-11-14)
+// Luminescence Ratio Analyzer version 0.27 (2016-12-01)
 // by Yan Chastagnier
 
 // Put this macro into the folder Fiji.app/macros/toolsets/
@@ -635,30 +635,30 @@ function makeRatioImage() {
 					if (!batchDivide) {
 						setBatchMode(true);
 					}
-					run("Duplicate...", "title=LUC_test2 duplicate");
-					run("Duplicate...", "title=LUC_test_otsu duplicate");
-					run("Duplicate...", "title=LUC_test_li5 duplicate");
-					run("Duplicate...", "title=LUC_test_li15 duplicate");
+					run("Duplicate...", "title=donor_test2 duplicate");
+					run("Duplicate...", "title=donor_test_otsu duplicate");
+					run("Duplicate...", "title=donor_test_li5 duplicate");
+					run("Duplicate...", "title=donor_test_li15 duplicate");
 					run("Gaussian Blur...", "sigma=15 stack");
-					selectWindow("LUC_test_li5");
+					selectWindow("donor_test_li5");
 					run("Gaussian Blur...", "sigma=5 stack");
-					imageCalculator("Subtract stack", "LUC_test", "LUC_test_li15");
-					imageCalculator("Subtract stack", "LUC_test2", "LUC_test_li5");
-					selectWindow("LUC_test");
+					imageCalculator("Subtract stack", donorName+"_test", "donor_test_li15");
+					imageCalculator("Subtract stack", "donor_test2", "donor_test_li5");
+					selectWindow(donorName+"_test");
 					//run("Median...", "radius=2 stack");
 					run("Auto Threshold", "method=Li white stack");
-					selectWindow("LUC_test2");
+					selectWindow("donor_test2");
 					//run("Median...", "radius=2 stack");
 					run("Auto Threshold", "method=Li white stack");
-					imageCalculator("AND stack", "LUC_test","LUC_test2");
-					selectWindow("LUC_test_otsu");
+					imageCalculator("AND stack", donorName+"_test","donor_test2");
+					selectWindow("donor_test_otsu");
 					run("Auto Threshold", "method=Otsu ignore_black ignore_white white stack");
-					imageCalculator("OR stack", "LUC_test","LUC_test_otsu");
-					close("LUC_test_li15");
-					close("LUC_test_li5");
-					close("LUC_test_otsu");
-					close("LUC_test2");
-					selectWindow("LUC_test");
+					imageCalculator("OR stack", donorName+"_test","donor_test_otsu");
+					close("donor_test_li15");
+					close("donor_test_li5");
+					close("donor_test_otsu");
+					close("donor_test2");
+					selectWindow(donorName+"_test");
 					if (!batchDivide) {
 						setBatchMode(false);
 					}
@@ -1120,43 +1120,56 @@ function makeRatioAnalysis() {
 		if (vsRatio) {
 			intensityMeasures2 = newArray(nbROI);
 		}
-		for (i = 1; i <= nbROI; i++) {
+		for (i = 1; i <= nbImages; i++) {
 			selectWindow("Ratio"+IJ.pad(i,2));
-			roiManager("select", i-1);
-			roiManager("Deselect");
-			if (i==1 || vsRatio) {
-				open(File.openDialog("Select intensity image 1 corresponding to Ratio"+IJ.pad(i,2)));
-				rename("Intensity 1 of Ratio"+IJ.pad(i,2));
-				setLocation(800, 100);
-			} else {
-				selectWindow("Intensity 1 of Ratio"+IJ.pad(i,2));
-			}
-			run("Restore Selection");
-			// User prompt to select fluorescent area
-			title = "Area selection";
-			msg = "Please select intensity area, then click \"OK\".";
-			waitForUser(title, msg);
-			if (isOpen("Intensity 1 of Ratio"+IJ.pad(i,2))) {
-				selectWindow("Intensity 1 of Ratio"+IJ.pad(i,2));
-			}
-			run("Measure");
-			run("Select None");
-			intensityMeasures[i-1] = round(getResult("Mean"));
-			if (i==nbROI || vsRatio) {
-				close();
-			} else {
-				rename("Intensity 1 of Ratio"+IJ.pad(i+1,2));
-			}
-			if (vsRatio) {
-				open(File.openDialog("Select intensity image 2 corresponding to Ratio"+IJ.pad(i,2)));
-				rename("Intensity 2 of Ratio"+IJ.pad(i,2));
-				setLocation(800, 100);
-				roiManager("select", i-1);
+			for (j = nbROIsArray[i-1]; j < nbROIsArray[i]; j++) {
+				if (j == nbROIsArray[i-1]) {
+					open(File.openDialog("Select intensity image 1 corresponding to Ratio"+IJ.pad(i,2)));
+					rename("Intensity 1 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+1,2));
+					setLocation(800, 100);
+				} else {
+					selectWindow("Intensity 1 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+1,2));
+				}
+				roiManager("select", j);
 				roiManager("Deselect");
+				// User prompt to select fluorescent area
+				title = "Area selection";
+				msg = "Please select intensity area, then click \"OK\".";
 				waitForUser(title, msg);
+				if (isOpen("Intensity 1 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+1,2))) {
+					selectWindow("Intensity 1 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+1,2));
+				}
 				run("Measure");
-				intensityMeasures2[i-1] = round(getResult("Mean"));
-				close();
+				run("Select None");
+				intensityMeasures[j] = round(getResult("Mean"));
+				if (j == nbROIsArray[i]-1) {
+					close();
+				} else {
+					rename("Intensity 1 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+2,2));
+				}
+				if (vsRatio) {
+					if (j == nbROIsArray[i-1]) {
+						open(File.openDialog("Select intensity image 2 corresponding to Ratio"+IJ.pad(i,2)));
+						rename("Intensity 2 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+1,2));
+						setLocation(900, 200);
+					} else {
+						selectWindow("Intensity 2 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+1,2));
+					}
+					roiManager("select", j);
+					roiManager("Deselect");
+					waitForUser(title, msg);
+					if (isOpen("Intensity 2 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+1,2))) {
+						selectWindow("Intensity 2 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+1,2));
+					}
+					run("Measure");
+					run("Select None");
+					intensityMeasures2[j] = round(getResult("Mean"));
+					if (j == nbROIsArray[i]-1) {
+						close();
+					} else {
+						rename("Intensity 2 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+2,2));
+					}
+				}
 			}
 		}
 	}
