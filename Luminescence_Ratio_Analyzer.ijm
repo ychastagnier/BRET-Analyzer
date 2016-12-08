@@ -1,4 +1,4 @@
-// Luminescence Ratio Analyzer version 0.27 (2016-12-01)
+// Luminescence Ratio Analyzer version 0.28 (2016-12-08)
 // by Yan Chastagnier
 
 // Put this macro into the folder Fiji.app/macros/toolsets/
@@ -221,7 +221,6 @@ function cleanImages() {
 				setSlice(i+1);
 				run("Translate...", "x=" + round(xcoord[i]) + " y=" + round(ycoord[i]) + " interpolation=None slice");
 			}
-			
 		}
 		if (!batchClean) {
 			setBatchMode("exit and display");
@@ -530,7 +529,7 @@ function makeRatioImage() {
 		} else {
 			imageList2 = getTIF("_clean", 2);
 			nbCROPs = 0;
-			for (i = 0; i < imageList2.length - nbCROPs; i++) {
+			for (i = 0; i < imageList2.length - nbCROPs; i++) { // Sort list to have all crops at the end
 				index = indexOf(imageList2[i], "CROP");
 				if (index != -1) {
 					nbCROPs++;
@@ -546,7 +545,7 @@ function makeRatioImage() {
 				imageList2 = Array.slice(imageList2, 0, imageList2.length-nbCROPs);
 			} // else "Folder: All": keep whole imageList2
 			for (i = 0; i < imageList2.length; i++) {
-				index = indexOf(imageList2[i], donorName);
+				index = lastIndexOf(imageList2[i], donorName);
 				if (index != -1) {
 					temp = substring(imageList2[i], 0, index)+acceptorName+substring(imageList2[i], index+lengthOf(donorName), lengthOf(imageList2[i]));
 					if (File.exists(temp)) {
@@ -865,7 +864,12 @@ function makeRatioImage() {
 		selectWindow("Ratio_AutoRange");
 		close();		
 		selectWindow("Ratio");
-		saveAs("tiff", substring(donor, 0, index)+"Ratio"+substring(donor, index+lengthOf(donorName), lengthOf(donor)-10));
+		if (index == -1) {
+			index = lastIndexOf(donor, "_")+1;
+			saveAs("tiff", substring(donor, 0, index)+"Ratio");
+		} else {
+			saveAs("tiff", substring(donor, 0, index)+"Ratio"+substring(donor, index+lengthOf(donorName), lengthOf(donor)-10));
+		}
 		close();
 	}
 	
