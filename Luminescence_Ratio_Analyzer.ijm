@@ -1,31 +1,31 @@
-// Luminescence Ratio Analyzer version 0.28 (2016-12-08)
+// Luminescence Ratio Analyzer version 0.29 (2017-05-03)
 // by Yan Chastagnier
 
 // Put this macro into the folder Fiji.app/macros/toolsets/
 // Select it with the >> symbol at the extrem right of the toolbar.
 // Use the Action Tools to run the different parts of the process.
 
-// Global parameters default values : change them to alter permanently default behaviour on toolset startup
-
-var donorName = "LUC"; // Donor
-var acceptorName = "YFP"; // Acceptor
-var batchClean = false; // Batch clean?
-var alignStacks = true; // Align stacks?
-var batchCrop = false; // Batch crop?
-var nameCROPs = true; // Give a label to CROPs?
-var divideSelection = "Image: Multi if CROP";
-var batchDivide = false; // Batch divide?
-var thresholdMethod = "AutoTh - Chastagnier";
-var coefMultMeanROI = 1; // Coefficient
-var radiusLocalTh = 10; // AutoLocalTh radius
-var overallMinThreshold = 0; // Minimum threshold
-var rangeMin = 0.2; // Min range
-var rangeMax = 2; // Max range
-var time_between_images_sec = 30; // Time between images (s)
-var normalizeSlice = 5; // Slice used to normalize
-var saveROIs = true; // Save ROIs?
-var plot3D = "No"; // Plot Ratio vs intensity?
-var dataFolderName = "data"; // Folder and data name
+// Global parameters
+var donorName = call("ij.Prefs.get", "LRA.donorName", "LUC"); // Donor
+var acceptorName = call("ij.Prefs.get", "LRA.acceptorName", "YFP"); // Acceptor
+var batchClean = call("ij.Prefs.get", "LRA.batchClean", false); // Batch clean?
+var subtractBackgroundImage = call("ij.Prefs.get", "LRA.subtractBackgroundImage", true); // Subtract dark image taken without luminescence (offset + read noise + light pollution)?
+var alignStacks = call("ij.Prefs.get", "LRA.alignStacks", true); // Align stacks?
+var batchCrop = call("ij.Prefs.get", "LRA.batchCrop", false); // Batch crop?
+var nameCROPs = call("ij.Prefs.get", "LRA.nameCROPs", true); // Give a label to CROPs?
+var divideSelection = call("ij.Prefs.get", "LRA.divideSelection", "Image: Multi if CROP");
+var batchDivide = call("ij.Prefs.get", "LRA.batchDivide", false); // Divide without confirmation
+var thresholdMethod = call("ij.Prefs.get", "LRA.thresholdMethod", "AutoTh - Chastagnier");
+var coefMultMeanROI = parseFloat(call("ij.Prefs.get", "LRA.coefMultMeanROI", 1)); // Coefficient
+var radiusLocalTh = parseFloat(call("ij.Prefs.get", "LRA.radiusLocalTh", 10)); // AutoLocalTh radius
+var overallMinThreshold = parseFloat(call("ij.Prefs.get", "LRA.overallMinThreshold", 0)); // Minimum threshold
+var rangeMin = parseFloat(call("ij.Prefs.get", "LRA.rangeMin", 0.2)); // Min range
+var rangeMax = parseFloat(call("ij.Prefs.get", "LRA.rangeMax", 2)); // Max range
+var time_between_images_sec = parseFloat(call("ij.Prefs.get", "LRA.time_between_images_sec", 30)); // Time between images (s)
+var normalizeSlice = parseFloat(call("ij.Prefs.get", "LRA.normalizeSlice", 5)); // Slice used to normalize
+var saveROIs = call("ij.Prefs.get", "LRA.saveROIs", true); // Save ROIs?
+var plot3D = call("ij.Prefs.get", "LRA.plot3D", "No"); // Plot Ratio vs intensity?
+var dataFolderName = call("ij.Prefs.get", "LRA.dataFolderName", "data"); // Folder and data name
 
 // Tools definition
 macro "Clean donor and acceptor images Action Tool - B03 C059 T060dC Ta60dl Td60de T3f0da Taf0dn" {cleanImages();}
@@ -39,25 +39,33 @@ macro "Batch set min and max of Ratio images in a folder and its subfolders Acti
 
 
 var nbROIsArray = newArray("0");
-
+var nbSlicesArray = newArray();
+var nbSlicesTotArray = newArray("0");
+var nbValuesTotArray = newArray("0");
+var path = "";
 
 // **************************************************
 // Clean donor and acceptor images
 // **************************************************
 function cleanImages() {
 	if (batchClean) {
-		imageList2 = getTIF(donorName, 1);
+		nbPass = 0;
 		imageList = newArray();
-		for (i = 0; i < imageList2.length; i++) {
-			donor = imageList2[i];
-			index = lastIndexOf(donor, donorName);
-			if (index != -1) {
-				acceptor = substring(donor, 0, index)+acceptorName+substring(donor, index+lengthOf(donorName), lengthOf(donor));
-			} else {
-				acceptor = "";
-			}
-			if (File.exists(donor) && File.exists(acceptor)) {
-				imageList = Array.concat(imageList, imageList2[i]);
+		path = "";
+		while (nbPass < 2 && lengthOf(imageList) == 0) {
+			nbPass++;
+			imageList2 = getFiles(donorName, nbPass, path);
+			for (i = 0; i < imageList2.length; i++) {
+				donor = imageList2[i];
+				index = lastIndexOf(donor, donorName);
+				if (index != -1) {
+					acceptor = substring(donor, 0, index)+acceptorName+substring(donor, index+lengthOf(donorName), lengthOf(donor));
+				} else {
+					acceptor = "";
+				}
+				if (File.exists(donor) && File.exists(acceptor)) {
+					imageList = Array.concat(imageList, imageList2[i]);
+				}
 			}
 		}
 	} else {
@@ -73,11 +81,20 @@ function cleanImages() {
 		donor = imageList[j];
 		// Create sub folder if needed
 		index = lastIndexOf(donor, donorName);
+		extensionSize = getExtensionSize(donor);
 		if (index == -1) {
-			folderPath = substring(donor, 0, lengthOf(donor)-4);
+			if (extensionSize == 0) {
+				folderPath = donor+"_";
+			} else {
+				folderPath = substring(donor, 0, lengthOf(donor)-extensionSize);
+			}
 		} else {
-			folderPath = substring(donor, 0, index)+substring(donor, index+lengthOf(donorName), lengthOf(donor)-4);
+			folderPath = substring(donor, 0, index)+substring(donor, index+lengthOf(donorName), lengthOf(donor)-extensionSize);
+			if (lengthOf(folderPath) == 1+lengthOf(File.getParent(donor))) {
+				folderPath += "clean";
+			}
 		}
+		print(File.isDirectory(folderPath), folderPath);
 		if (!File.exists(folderPath)) {
 			File.makeDirectory(folderPath);
 		}
@@ -85,7 +102,7 @@ function cleanImages() {
 		// Open and place images
 		open(donor);
 		run("Enhance Contrast", "saturated=0.35");
-		setLocation(110, 110);
+		setLocation(0.05*screenWidth, 0.1*screenHeight);
 		rename(donorName);
 		
 		if (index != -1) {
@@ -99,8 +116,44 @@ function cleanImages() {
 		}
 		open(acceptor);
 		run("Enhance Contrast", "saturated=0.35");
-		setLocation(1010, 110);
+		setLocation(0.5*screenWidth, 0.1*screenHeight);
 		rename(acceptorName);
+		
+		if (subtractBackgroundImage && j==0) {
+			bgImageSmoothRadius = 10;
+			donorBG = File.openDialog("Select background image for "+donorName);
+			acceptorBG = File.openDialog("Select background image for "+acceptorName);
+			open(donorBG);
+			setLocation(0.03*screenWidth, 0.06*screenHeight);
+			if (nSlices > 1) {
+				stackDonorBGID = getImageID();
+				run("Z Project...", "projection=Median");
+				rename(donorName+"BackGround");
+				donorBGID = getImageID();
+				selectImage(stackDonorBGID);
+				close();
+			} else {
+				rename(donorName+"BackGround");
+				donorBGID = getImageID();
+			}
+			run("Median...", "radius="+bgImageSmoothRadius);
+			open(acceptorBG);
+			setLocation(0.48*screenWidth, 0.06*screenHeight);
+			rename(acceptorName+"BackGround");
+			if (nSlices > 1) {
+				stackAcceptorBGID = getImageID();
+				run("Z Project...", "projection=Median");
+				rename(acceptorName+"BackGround");
+				acceptorBGID = getImageID();
+				selectImage(stackAcceptorBGID);
+				close();
+			} else {
+				rename(acceptorName+"BackGround");
+				acceptorBGID = getImageID();
+			}
+			run("Median...", "radius="+bgImageSmoothRadius);
+			selectWindow(acceptorName);
+		}
 
 		selectWindow(donorName);
 		coords = getBgArea();
@@ -119,14 +172,27 @@ function cleanImages() {
 		if (!batchClean && nSlices != 1) {
 			// Ask the user if he wants to align images
 			Dialog.create("Align");
-			Dialog.addCheckbox("Align images?", true);
+			Dialog.addCheckbox("Align images?", alignStacks);
 			Dialog.addHelp("http://htmlpreview.github.com/?https://github.com/ychastagnier/LR-Analyzer/blob/master/help/align.html");
 			Dialog.show();
 			alignStacks = Dialog.getCheckbox();
+			call("ij.Prefs.set", "LRA.alignStacks", alignStacks);
 		}
 		
 		setBatchMode(true);
 		
+		// Get median value from area selected on background images (not to subtract them twice)
+		if (subtractBackgroundImage && j==0) {
+			selectImage(donorBGID);
+			run("Restore Selection");
+			run("Measure");
+			medAreaImageBGDonor = getResult("Median");
+			selectImage(acceptorBGID);
+			run("Restore Selection");
+			run("Measure");
+			medAreaImageBGAcceptor = getResult("Median");
+		}
+				
 		// Clean donor
 		run("Set Measurements...", "mean standard min median redirect=None decimal=3");
 		selectWindow(donorName);
@@ -137,6 +203,9 @@ function cleanImages() {
 			run("Restore Selection");
 			run("Measure");
 			backgroundDonor = getResult("Median");
+			if (subtractBackgroundImage) {
+				backgroundDonor -= medAreaImageBGDonor;
+			}
 			run("Select None");
 			run("Subtract...", "value=" + backgroundDonor + " slice"); // Remove background
 		}
@@ -150,8 +219,17 @@ function cleanImages() {
 			run("Restore Selection");
 			run("Measure");
 			backgroundAcceptor = getResult("Median");
+			if (subtractBackgroundImage) {
+				backgroundAcceptor -= medAreaImageBGAcceptor;
+			}
 			run("Select None");
 			run("Subtract...", "value=" + backgroundAcceptor + " slice"); // Remove background
+		}
+		
+		// Subtract background images
+		if (subtractBackgroundImage) {
+			imageCalculator("Subtract stack", donorName, donorName+"BackGround");
+			imageCalculator("Subtract stack", acceptorName, acceptorName+"BackGround");
 		}
 		
 		// Align slices using TurboReg plugin to compute translation coordinates
@@ -232,20 +310,21 @@ function cleanImages() {
 		
 		// Save "clean" images in subfolder
 		selectWindow(acceptorName);
-		setLocation(1010, 110);
+		setLocation(0.5*screenWidth, 0.1*screenHeight);
 		setSlice(1);
 		run("Enhance Contrast", "saturated=0.35");
-		saveAs("tiff", folderPath + File.separator + substring(File.getName(acceptor), 0, lengthOf(File.getName(acceptor))-4)+"_clean");
+		extensionSizeAcceptor = getExtensionSize(acceptor);
+		saveAs("tiff", folderPath + File.separator + substring(File.getName(acceptor), 0, lengthOf(File.getName(acceptor))-extensionSizeAcceptor)+"_clean");
 		if (batchClean) {
 			close();
 		} else {
 			rename(acceptorName+"_clean");
 		}
 		selectWindow(donorName);
-		setLocation(110, 110);
+		setLocation(0.05*screenWidth, 0.1*screenHeight);
 		setSlice(1);
 		run("Enhance Contrast", "saturated=0.35");
-		saveAs("tiff", folderPath + File.separator + substring(File.getName(donor), 0, lengthOf(File.getName(donor))-4)+"_clean");
+		saveAs("tiff", folderPath + File.separator + substring(File.getName(donor), 0, lengthOf(File.getName(donor))-extensionSize)+"_clean");
 		if (batchClean) {
 			close();
 		} else {
@@ -253,6 +332,9 @@ function cleanImages() {
 		}
 	}
 	if (batchClean) {
+		if (lengthOf(imageList) == 0) {
+			print("No pairs of images were found with donorName", donorName, "and acceptorName", acceptorName, "in the selected folder.");
+		}
 		print("Clean operation finished");
 	}
 	beep();
@@ -282,7 +364,7 @@ function cropImages() {
 			donor = File.openDialog("Select "+donorName+" image");
 			imageList = Array.concat(imageList, donor);
 		} else {
-			imageList2 = getTIF("_clean", 2);
+			imageList2 = getFiles("_clean.tif", 3, "");
 			imageList = newArray(imageList2.length);
 			nbImages = 0;
 			for (i = 0; i < imageList2.length; i++) {
@@ -310,7 +392,7 @@ function cropImages() {
 		}
 		//open(donor);
 		//rename(donorName+"_clean");
-		//setLocation(110, 110);
+		//setLocation(0.05*screenWidth, 0.1*screenHeight);
 		//run("Enhance Contrast", "saturated=0.35");
 	}
 	if (imageList.length == 1) {
@@ -330,7 +412,7 @@ function cropImages() {
 			if (alreadyOpen) {
 				open(acceptor);
 				rename(acceptorName+"_clean");
-				setLocation(1010, 110);
+				setLocation(0.5*screenWidth, 0.1*screenHeight);
 				run("Enhance Contrast", "saturated=0.35");
 			}
 		}
@@ -343,12 +425,12 @@ function cropImages() {
 			index = lastIndexOf(donor, donorName);
 			open(donor);
 			rename(donorName+"_clean");
-			setLocation(110, 110);
+			setLocation(0.05*screenWidth, 0.1*screenHeight);
 			run("Enhance Contrast", "saturated=0.35");
 			acceptor = imageList[2*nbImages+1];
 			open(acceptor);
 			rename(acceptorName+"_clean");
-			setLocation(1010, 110);
+			setLocation(0.5*screenWidth, 0.1*screenHeight);
 			run("Enhance Contrast", "saturated=0.35");
 		} else {
 			selectWindow(donorName+"_clean");
@@ -473,7 +555,9 @@ function cropImages() {
 		selectWindow(acceptorName+"_clean");
 		close();
 	}
-	
+	if (lengthOf(imageList) == 0) {
+		print("No pairs of images were found with donorName", donorName, "and acceptorName", acceptorName, "in the selected folder.");
+	}
 	showStatus("Crop Operation finished.");
 }
 
@@ -527,7 +611,7 @@ function makeRatioImage() {
 				imageList = Array.concat(imageList, donor);
 			}
 		} else {
-			imageList2 = getTIF("_clean", 2);
+			imageList2 = getFiles("_clean.tif", 3, "");
 			nbCROPs = 0;
 			for (i = 0; i < imageList2.length - nbCROPs; i++) { // Sort list to have all crops at the end
 				index = indexOf(imageList2[i], "CROP");
@@ -573,7 +657,7 @@ function makeRatioImage() {
 			if (alreadyOpen) {
 				open(acceptor);
 				rename(acceptorName+"_clean");
-				setLocation(1010, 110);
+				setLocation(0.5*screenWidth, 0.1*screenHeight);
 				run("Enhance Contrast", "saturated=0.35");
 			}
 		}
@@ -588,12 +672,12 @@ function makeRatioImage() {
 			index = lastIndexOf(donor, donorName);
 			open(donor);
 			rename(donorName+"_clean");
-			setLocation(110, 110);
+			setLocation(0.05*screenWidth, 0.1*screenHeight);
 			run("Enhance Contrast", "saturated=0.35");
 			acceptor = imageList[2*i+1];
 			open(acceptor);
 			rename(acceptorName+"_clean");
-			setLocation(1010, 110);
+			setLocation(0.5*screenWidth, 0.1*screenHeight);
 			run("Enhance Contrast", "saturated=0.35");
 		} else {
 			selectWindow(donorName+"_clean");
@@ -629,7 +713,7 @@ function makeRatioImage() {
 				run("Select None");
 				run("Duplicate...", "title="+donorName+"_test duplicate");
 				selectWindow(donorName+"_test");
-				setLocation(110, 310);
+				setLocation(0.05*screenWidth, 0.4*screenHeight);
 				if (endsWith(thresholdMethod, "Chastagnier")) {
 					if (!batchDivide) {
 						setBatchMode(true);
@@ -665,7 +749,7 @@ function makeRatioImage() {
 					run("Auto Threshold", "method="+substring(thresholdMethod, 9, lengthOf(thresholdMethod))+" ignore_black ignore_white white stack");
 				}
 				run("Duplicate...", "title="+donorName+"_Mask duplicate");
-				setLocation(1010, 310);
+				setLocation(0.5*screenWidth, 0.4*screenHeight);
 				selectWindow(donorName+"_test");
 				run("Divide...", "value=255 stack");
 				run("16-bit");
@@ -677,11 +761,11 @@ function makeRatioImage() {
 				run("Select None");
 				run("Duplicate...", "title="+donorName+"_test duplicate");
 				selectWindow(donorName+"_test");
-				setLocation(110, 310);
+				setLocation(0.05*screenWidth, 0.4*screenHeight);
 				run("8-bit");
 				run("Auto Local Threshold", "method="+substring(thresholdMethod, 14, lengthOf(thresholdMethod))+" radius="+radiusLocalTh+" parameter_1=0 parameter_2=0 white stack");
 				run("Duplicate...", "title="+donorName+"_Mask duplicate");
-				setLocation(1010, 310);
+				setLocation(0.05*screenWidth, 0.4*screenHeight);
 				selectWindow(donorName+"_test");
 				run("Divide...", "value=255 stack");
 				run("16-bit");
@@ -707,7 +791,7 @@ function makeRatioImage() {
 				selectWindow(donorName+"_clean");
 				run("Duplicate...", "title="+donorName+"_test duplicate");
 				selectWindow(donorName+"_test");
-				setLocation(110, 310);
+				setLocation(0.05*screenWidth, 0.4*screenHeight);
 				for (n=1; n<=nSlices; n++) {
 					setSlice(n);
 					run("Restore Selection");
@@ -730,7 +814,7 @@ function makeRatioImage() {
 					changeValues(0, overallMinThreshold, 0); // set to 0 pixels for which value is under the "minimum threshold"
 				}
 			}
-			
+			print(thresholdUsedFile, "Overall Minimum Threshold : "+overallMinThreshold);
 			File.close(thresholdUsedFile);
 			
 			run("Enhance Contrast", "saturated=0.35");
@@ -752,9 +836,13 @@ function makeRatioImage() {
 				Dialog.addCheckbox("Update Threshold Settings?", updateThreshold);
 				Dialog.show();
 				thresholdMethod = Dialog.getChoice();
+				call("ij.Prefs.set", "LRA.thresholdMethod", thresholdMethod);
 				coefMultMeanROI = Dialog.getNumber();
+				call("ij.Prefs.set", "LRA.coefMultMeanROI", coefMultMeanROI);
 				radiusLocalTh = Dialog.getNumber();
+				call("ij.Prefs.set", "LRA.radiusLocalTh", radiusLocalTh);
 				overallMinThreshold = Dialog.getNumber();
+				call("ij.Prefs.set", "LRA.overallMinThreshold", overallMinThreshold);
 				updateThreshold = Dialog.getCheckbox();
 			} else {
 				updateThreshold = false;
@@ -764,7 +852,7 @@ function makeRatioImage() {
 		close(donorName+"_clean");
 		selectWindow(donorName+"_test");
 		rename(donorName+"_clean");
-		setLocation(110, 110);
+		setLocation(0.05*screenWidth, 0.1*screenHeight);
 		
 		run("Misc...", "divide=0.0");
 		
@@ -775,12 +863,12 @@ function makeRatioImage() {
 		close();
 		selectWindow("Result of "+acceptorName+"_clean");
 		rename("Ratio");
-		setLocation(110, 110);
+		setLocation(0.05*screenWidth, 0.1*screenHeight);
 		call("ij.ImagePlus.setDefault16bitRange", 16);
 		
 		// Create a duplicate of the Ratio image with computed color range
 		run("Duplicate...", "title=Ratio_AutoRange duplicate");
-		setLocation(1010, 110);
+		setLocation(0.5*screenWidth, 0.1*screenHeight);
 		setThreshold(0.01, 10, "no color");
 		run("NaN Background", "stack");
 		run("Statistics");
@@ -822,11 +910,11 @@ function makeRatioImage() {
 				run("16 colors");
 				run("Histogram", "bins=256 use x_min=0 x_max=2 y_max=Auto");
 				rename("Slice Histogram of Ratio");
-				setLocation(670,350);
+				setLocation(0.33*screenWidth, 0.2*screenHeight);
 				selectWindow("Ratio");
 				run("Histogram", "bins=256 x_min="+minStack+" x_max="+maxStack+" y_max=Auto stack");
 				rename("Stack Histogram of Ratio");
-				setLocation(670,680);
+				setLocation(0.33*screenWidth, 0.55*screenHeight);
 				
 				title = "Check";
 				msg = "Check values ["+rangeMin+", "+rangeMax+"] then click \"OK\".\nAuto Range : ["+minStack+", "+maxStack+"]";
@@ -838,7 +926,9 @@ function makeRatioImage() {
 				Dialog.addCheckbox("Update Min and Max?", true);
 				Dialog.show();
 				rangeMin = Dialog.getNumber();
+				call("ij.Prefs.set", "LRA.rangeMin", rangeMin);
 				rangeMax = Dialog.getNumber();
+				call("ij.Prefs.set", "LRA.rangeMax", rangeMax);
 				updateMinMax = Dialog.getCheckbox();
 				if (isOpen("Slice Histogram of Ratio")) {
 					selectWindow("Slice Histogram of Ratio");
@@ -864,11 +954,29 @@ function makeRatioImage() {
 		selectWindow("Ratio_AutoRange");
 		close();		
 		selectWindow("Ratio");
-		if (index == -1) {
-			index = lastIndexOf(donor, "_")+1;
-			saveAs("tiff", substring(donor, 0, index)+"Ratio");
-		} else {
-			saveAs("tiff", substring(donor, 0, index)+"Ratio"+substring(donor, index+lengthOf(donorName), lengthOf(donor)-10));
+		indexClean = lastIndexOf(donor, "_clean.tif");
+		indexLastFileSep = lastIndexOf(donor, File.separator);
+		indexExtension = lastIndexOf(donor, ".");
+		if (index <= indexLastFileSep) { // donorName is not in the file name
+			if (indexClean <= indexLastFileSep) { // "Clean" tool was not used on this image
+				if (indexExtension <= indexLastFileSep) { // image has no extension
+					saveAs("tiff", donor+"_Ratio");
+				} else { // image has extension
+					saveAs("tiff", substring(donor, 0, indexExtension)+"_Ratio");
+				}
+			} else { // image ends with _clean.tif
+				saveAs("tiff", substring(donor, 0, indexClean)+"_Ratio");
+			}
+		} else { // donorName is in the file name
+			if (indexClean <= indexLastFileSep) { // but no clean
+				if (indexExtension < index) { // image has no extension or donorName is after last dot
+					saveAs("tiff", substring(donor, 0, index)+"Ratio"+substring(donor, index+lengthOf(donorName), lengthOf(donor)));
+				} else { // image has extension
+					saveAs("tiff", substring(donor, 0, index)+"Ratio"+substring(donor, index+lengthOf(donorName), indexExtension));
+				}
+			} else { // and it was cleaned, this should be most general case
+				saveAs("tiff", substring(donor, 0, index)+"Ratio"+substring(donor, index+lengthOf(donorName), lengthOf(donor)-10));
+			}
 		}
 		close();
 	}
@@ -879,9 +987,14 @@ function makeRatioImage() {
 	}
 	
 	if (batchDivide) {
+		close("*");
 		setBatchMode(false);
+		if (lengthOf(imageList) == 0) {
+			print("No pairs of images were found with donorName", donorName, "and acceptorName", acceptorName, "in the selected folder.");
+		}
+		beep();
+		print("Divide Operation finished.");
 	}
-	
 	showStatus("Divide Operation finished.");
 }
 
@@ -890,7 +1003,7 @@ function makeRatioImage() {
 // Ratio Analysis
 // **************************************************
 function makeRatioAnalysis() {
-	imagesParentAndFileNames = newArray();
+	imagesPaths = newArray();
 	roiManagerNames = getRoiManagerNames();
 	
 	// close images which names don't start with "Ratio"
@@ -943,7 +1056,7 @@ function makeRatioAnalysis() {
 		roiNb = 0;
 		if (nbImages != parseInt(substring(imageTitles[i], 4))) {
 			selectWindow(imageTitles[i]);
-			setLocation(20*nbImages, 20+20*nbImages);
+			setLocImage(nbImages);
 			rename("Ratio"+IJ.pad(nbImages,2));
 			for (j = 0; j < roiManagerNames.length; j++) {
 				if (startsWith(roiManagerNames[j], imageTitles[i])) {
@@ -960,13 +1073,15 @@ function makeRatioAnalysis() {
 				}
 			}
 		}
-		parentAndFileName = getParentAndFileName();
-		imagesParentAndFileNames = Array.concat(imagesParentAndFileNames, parentAndFileName);
+		imagePath = getInfo("image.directory")+getInfo("image.filename");
+		imagesPaths = Array.concat(imagesPaths, imagePath);
 		if (nbImages == 1) {
 			folderPath = getDirectory("image");
-			slicesByStack = nSlices;
 		}
 		nbROIsArray[nbImages] = roiNb+nbROIsArray[nbImages-1];
+		nbSlicesArray[nbImages-1] = nSlices;
+		nbSlicesTotArray[nbImages] = nSlices+nbSlicesTotArray[nbImages-1];
+		nbValuesTotArray[nbImages] = roiNb*nSlices+nbValuesTotArray[nbImages-1];
 	}
 	
 	if (nbImages != 0) {
@@ -980,6 +1095,7 @@ function makeRatioAnalysis() {
 	
 	while (addImages) {
 		imageRatio = File.openDialog("Select Ratio image "+(nbImages+1));
+		imageRatioCopy = imageRatio;
 		if (endsWith(imageRatio, ".txt")) { // If the user selects a text file instead of an image, read the file to get the list of images to open
 			imagesList = split(File.openAsString(imageRatio),"\n");
 			imagesNumber = imagesList.length;
@@ -997,17 +1113,22 @@ function makeRatioAnalysis() {
 				if (midEndPath.length == 2) {
 					imageRatio = startPath + File.separator + midEndPath[0] + File.separator + midEndPath[1];
 				} else {
-					cancel = true;
+					commonSize = getCommonStartPath(imagesList[j], imagesList[imagesNumber-1]);
+					imageRatioCopySplit = split(imageRatioCopy, "\\\/");
+					imageRatio = ""+getSubPath(imageRatioCopy, 0, imageRatioCopySplit.length - commonSize[2])+File.separator+getSubPath(imagesList[j], 0, -commonSize[1]);
+					if (!File.exists(imageRatio)) {
+						cancel = true;
+					}
 				}
 			}
 			if (!cancel) {
 				nbImages++;
 				open(imageRatio);
 				rename("Ratio"+IJ.pad(nbImages,2));
-				parentAndFileName = getParentAndFileName();
+				imagePath = getInfo("image.directory")+getInfo("image.filename");
 				imageAlreadyOpen = -1;
-				for (i = 0; i < imagesParentAndFileNames.length; i++) {
-					if (matches(parentAndFileName, imagesParentAndFileNames[i])) {
+				for (i = 0; i < imagesPaths.length; i++) {
+					if (samePaths(imagesPaths[i],imagePath)) {
 						imageAlreadyOpen = i+1;
 						break;
 					}
@@ -1037,7 +1158,7 @@ function makeRatioAnalysis() {
 					if (nbImages == 1) {
 						folderPath = getDirectory("image");
 					}
-					setLocation(20*nbImages, 20+20*nbImages);
+					setLocImage(nbImages);
 					roisPath = getROIPath();
 					if (File.exists(roisPath)) {
 						i = roiManager("count");
@@ -1047,25 +1168,30 @@ function makeRatioAnalysis() {
 					} else {
 						msg = "";
 					}
-					slicesByStack = nSlices;
 					
 					if (!usetxt) {
 						title = "ROIs selection";
 						msg = msg+"Add your regions (Ctrl+T) to the ROI manager on image Ratio"+IJ.pad(nbImages,2)+", then click \"OK\".";
 						waitForUser(title, msg);
 					}
-					
+					roiNb = roiManager("count") - nbROIsArray[nbImages-1]; 
 					if (lengthOf(nbROIsArray) > nbImages) {
 						nbROIsArray[nbImages] = roiManager("count");
+						nbSlicesTotArray[nbImages] = nSlices+nbSlicesTotArray[nbImages-1];
+						nbValuesTotArray[nbImages] = roiNb*nSlices+nbValuesTotArray[nbImages-1];
+						nbSlicesArray[nbImages-1] = nSlices;
 					} else {
 						nbROIsArray = Array.concat(nbROIsArray, roiManager("count"));
+						nbSlicesTotArray = Array.concat(nbSlicesTotArray, nSlices+nbSlicesTotArray[nbImages-1]);
+						nbValuesTotArray = Array.concat(nbValuesTotArray, roiNb*nSlices+nbValuesTotArray[nbImages-1]);
+						nbSlicesArray = Array.concat(nbSlicesArray, nSlices);
 					}
 					if (nbROIsArray[nbImages]-nbROIsArray[nbImages-1]==0) {
 						close();
 						nbImages--;
 						showMessage("Image closed", "The image was closed because no regions were selected on it.");
 					} else {
-						imagesParentAndFileNames = Array.concat(imagesParentAndFileNames, parentAndFileName);
+						imagesPaths = Array.concat(imagesPaths, imagePath);
 						for (i = 0; i < nbROIsArray[nbImages]-nbROIsArray[nbImages-1]; i++) {
 							roiManager("select", nbROIsArray[nbImages-1]+i);
 							roiManager("Rename", "Ratio"+IJ.pad(nbImages,2)+"_"+IJ.pad(i+1,2));
@@ -1080,37 +1206,48 @@ function makeRatioAnalysis() {
 		Dialog.show();
 		addImages = Dialog.getCheckbox();
 	}
-	
+	tempArray = Array.trim(nbSlicesArray, nbImages);
+	Array.getStatistics(tempArray, nbSlicesMin, nbSlicesMax, nbSlicesMean, nbSlicesStdDev);
 	Dialog.create("Parameters");
-	Dialog.addNumber("Time between images (s)", time_between_images_sec);
-	Dialog.addNumber("Slice to use for normalization", normalizeSlice);
+	if (nbSlicesMax > 1) {
+		Dialog.addNumber("Time between images (s)", time_between_images_sec);
+		Dialog.addNumber("Slice to use for normalization", normalizeSlice);
+	}
 	Dialog.addCheckbox("Save ROIs?", saveROIs);
 	Dialog.addChoice("Plot Ratio vs intensity?", newArray("No", "Vs intensity", "Vs intensity ratio"), plot3D);
 	Dialog.addString("Folder and Data Name", dataFolderName, 18);
 	Dialog.addHelp("http://htmlpreview.github.com/?https://github.com/ychastagnier/LR-Analyzer/blob/master/help/analyse.html");
 	Dialog.show();
-	time_between_images_sec = Dialog.getNumber();
-	normalizeSlice = Dialog.getNumber();
+	if (nbSlicesMax > 1) {
+		time_between_images_sec = Dialog.getNumber();
+		call("ij.Prefs.set", "LRA.time_between_images_sec", time_between_images_sec);
+		normalizeSlice = Dialog.getNumber();
+		call("ij.Prefs.set", "LRA.normalizeSlice", normalizeSlice);
+	}
 	saveROIs = Dialog.getCheckbox();
+	call("ij.Prefs.set", "LRA.saveROIs", saveROIs);
 	plot3D = Dialog.getChoice();
+	call("ij.Prefs.set", "LRA.plot3D", plot3D);
 	dataFolderName = Dialog.getString();
 	
 	if (matches(dataFolderName, "")) {
 		dataFolderName = "data";
 	}
+	call("ij.Prefs.set", "LRA.dataFolderName", dataFolderName);
 	
 	f = File.open(folderPath+dataFolderName+".txt");
-	for (i = 0; i < imagesParentAndFileNames.length; i++) {
+	for (i = 0; i < imagesPaths.length; i++) {
 		duplicate = false;
 		for (j = 0; j < i; j++) {
-			if (matches(imagesParentAndFileNames[i], imagesParentAndFileNames[j])) {
+			if (samePaths(imagesPaths[i],imagesPaths[j])) {
 				duplicate = true;
 			}
 		}
 		if (!duplicate) {
-			print(f, imagesParentAndFileNames[i]);
+			print(f, imagesPaths[i]);
 		}
 	}
+	print(f, folderPath+dataFolderName+".txt"); // writes the file name at the end of the file for relative path building
 	File.close(f);
 	
 	nbROI = roiManager("count");	
@@ -1130,7 +1267,7 @@ function makeRatioAnalysis() {
 				if (j == nbROIsArray[i-1]) {
 					open(File.openDialog("Select intensity image 1 corresponding to Ratio"+IJ.pad(i,2)));
 					rename("Intensity 1 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+1,2));
-					setLocation(800, 100);
+					setLocation(0.40*screenWidth, 0.1*screenHeight);
 				} else {
 					selectWindow("Intensity 1 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+1,2));
 				}
@@ -1155,7 +1292,7 @@ function makeRatioAnalysis() {
 					if (j == nbROIsArray[i-1]) {
 						open(File.openDialog("Select intensity image 2 corresponding to Ratio"+IJ.pad(i,2)));
 						rename("Intensity 2 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+1,2));
-						setLocation(900, 200);
+						setLocation(0.45*screenWidth, 0.2*screenHeight);
 					} else {
 						selectWindow("Intensity 2 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+1,2));
 					}
@@ -1176,7 +1313,7 @@ function makeRatioAnalysis() {
 				}
 			}
 		}
-	}
+	} // end of 3D Plot Part 1/2 (measure)
 	
 	dataFolderPath = folderPath+dataFolderName+File.separator;
 	if (!File.exists(dataFolderPath)) {
@@ -1196,7 +1333,7 @@ function makeRatioAnalysis() {
 	dataNormGraphPathXLS = dataFolderPath+dataFolderName+"Norm.xls";
 	
 	time_between_images = time_between_images_sec/60.0;
-	if (normalizeSlice > slicesByStack || normalizeSlice < 1) {
+	if (normalizeSlice > nbSlicesMin || normalizeSlice < 1) {
 		normalizeSlice = 1;
 	}
 	fullIndex = Array.getSequence(nbROI+1);
@@ -1235,8 +1372,9 @@ function makeRatioAnalysis() {
 	}
 	
 	// Arrays initialization
-	meanROI = newArray(slicesByStack*nbROI);
-	stdDevROI = newArray(slicesByStack*nbROI);
+	arraySize = nbValuesTotArray[nbImages];
+	meanROI = newArray(arraySize);
+	stdDevROI = newArray(arraySize);
 	
 	run("Set Measurements...", "mean standard min limit redirect=None decimal=3");
 	run("Clear Results");
@@ -1247,7 +1385,7 @@ function makeRatioAnalysis() {
 		setThreshold(0.01, 65535, "no color");
 		for (j = nbROIsArray[k-1]; j < nbROIsArray[k]; j++){
 			roiManager("Select", j);
-			for (n=1; n<=slicesByStack; n++) {
+			for (n=1; n<=nbSlicesArray[k-1]; n++) {
 				setSlice(n);
 				run("Measure");
 				meanValueTemp = getResult("Mean");
@@ -1264,10 +1402,10 @@ function makeRatioAnalysis() {
 	
 	run("Clear Results");
 	setOption("ShowRowNumbers", false);
-	timeArray = newArray(slicesByStack);
+	timeArray = newArray(nbSlicesMax);
 	colors = newArray("black", "blue","green","magenta","orange","red","yellow","gray","cyan","pink");
 	
-	for (n=0; n<slicesByStack; n++) {
+	for (n=0; n<nbSlicesMax; n++) {
 		timeArray[n] = n * time_between_images;
 		setResult("t(min)", n, n * time_between_images);
 	}
@@ -1276,134 +1414,148 @@ function makeRatioAnalysis() {
 	// Normalization of means and standard deviations
 	meanROI_Norm = Array.copy(meanROI);
 	stdDevROI_Norm = Array.copy(stdDevROI);
-	for (j=0; j<nbROI; j++) {
-		tempNorm = meanROI_Norm[j*slicesByStack+normalizeSlice-1];
-		if (tempNorm == 0) {tempNorm = 1;}
-		for (n=0; n<slicesByStack; n++) {	
-			meanROI_Norm[j*slicesByStack+n] = meanROI_Norm[j*slicesByStack+n]/tempNorm;
-			stdDevROI_Norm[j*slicesByStack+n] = stdDevROI_Norm[j*slicesByStack+n]/tempNorm;
-		}
-	}
-	
-	// Compute quartiles of regions of interest
-	q1 = (nbROI-1) * 0.25;
-	q1d = floor(q1);
-	q1 = q1 - q1d;
-	q3 = (nbROI-1) * 0.75;
-	q3d = floor(q3);
-	q3 = q3 - q3d;
-	q4 = nbROI-1;
-	
-	q0ROIs = newArray(slicesByStack);
-	q1ROIs = newArray(slicesByStack);
-	q2ROIs = newArray(slicesByStack);
-	q3ROIs = newArray(slicesByStack);
-	q4ROIs = newArray(slicesByStack);
-	
-	q0ROIsSD = newArray(slicesByStack);
-	q1ROIsSD = newArray(slicesByStack);
-	q2ROIsSD = newArray(slicesByStack);
-	q3ROIsSD = newArray(slicesByStack);
-	q4ROIsSD = newArray(slicesByStack);
-	
-	q0ROIsNorm = newArray(slicesByStack);
-	q1ROIsNorm = newArray(slicesByStack);
-	q2ROIsNorm = newArray(slicesByStack);
-	q3ROIsNorm = newArray(slicesByStack);
-	q4ROIsNorm = newArray(slicesByStack);
-	
-	q0ROIsSDNorm = newArray(slicesByStack);
-	q1ROIsSDNorm = newArray(slicesByStack);
-	q2ROIsSDNorm = newArray(slicesByStack);
-	q3ROIsSDNorm = newArray(slicesByStack);
-	q4ROIsSDNorm = newArray(slicesByStack);
-	
-	tempArray = newArray(nbROI);
-	tempArraySD = newArray(nbROI);
-	tempArrayNorm = newArray(nbROI);
-	tempArraySDNorm = newArray(nbROI);
-	for (n=0; n<slicesByStack; n++) {	
-		for (j=0; j<nbROI; j++) {
-			tempArray[j] = meanROI[j*slicesByStack+n];
-			tempArraySD[j] = stdDevROI[j*slicesByStack+n];
-			tempArrayNorm[j] = meanROI_Norm[j*slicesByStack+n];
-			tempArraySDNorm[j] = stdDevROI_Norm[j*slicesByStack+n];
-		}
-		Array.sort(tempArray);
-		Array.sort(tempArraySD);
-		Array.sort(tempArrayNorm);
-		Array.sort(tempArraySDNorm);
-		q0ROIs[n] = tempArray[0];
-		q0ROIsSD[n] = tempArraySD[0];
-		q0ROIsNorm[n] = tempArrayNorm[0];
-		q0ROIsSDNorm[n] = tempArraySDNorm[0];
-		q4ROIs[n] = tempArray[q4];
-		q4ROIsSD[n] = tempArraySD[q4];
-		q4ROIsNorm[n] = tempArrayNorm[q4];
-		q4ROIsSDNorm[n] = tempArraySDNorm[q4];
-		if (nbROI % 2 == 0) {
-			q2ROIs[n] = (tempArray[nbROI/2]+tempArray[nbROI/2-1])/2;
-			q2ROIsSD[n] = (tempArraySD[nbROI/2]+tempArraySD[nbROI/2-1])/2;
-			q2ROIsNorm[n] = (tempArrayNorm[nbROI/2]+tempArrayNorm[nbROI/2-1])/2;
-			q2ROIsSDNorm[n] = (tempArraySDNorm[nbROI/2]+tempArraySDNorm[nbROI/2-1])/2;
-		} else {
-			q2ROIs[n] = tempArray[(nbROI-1)/2];
-			q2ROIsSD[n] = tempArraySD[(nbROI-1)/2];
-			q2ROIsNorm[n] = tempArrayNorm[(nbROI-1)/2];
-			q2ROIsSDNorm[n] = tempArraySDNorm[(nbROI-1)/2];
-		}
-		if (q1 == 0) {
-			q1ROIs[n] = tempArray[q1d];
-			q3ROIs[n] = tempArray[q3d];
-			q1ROIsSD[n] = tempArraySD[q1d];
-			q3ROIsSD[n] = tempArraySD[q3d];
-			q1ROIsNorm[n] = tempArrayNorm[q1d];
-			q3ROIsNorm[n] = tempArrayNorm[q3d];
-			q1ROIsSDNorm[n] = tempArraySDNorm[q1d];
-			q3ROIsSDNorm[n] = tempArraySDNorm[q3d];
-		} else {
-			q1ROIs[n] = tempArray[q1d]*(1-q1)+tempArray[q1d+1]*q1;
-			q3ROIs[n] = tempArray[q3d]*(1-q3)+tempArray[q3d+1]*q3;
-			q1ROIsSD[n] = tempArraySD[q1d]*(1-q1)+tempArraySD[q1d+1]*q1;
-			q3ROIsSD[n] = tempArraySD[q3d]*(1-q3)+tempArraySD[q3d+1]*q3;
-			q1ROIsNorm[n] = tempArrayNorm[q1d]*(1-q1)+tempArrayNorm[q1d+1]*q1;
-			q3ROIsNorm[n] = tempArrayNorm[q3d]*(1-q3)+tempArrayNorm[q3d+1]*q3;
-			q1ROIsSDNorm[n] = tempArraySDNorm[q1d]*(1-q1)+tempArraySDNorm[q1d+1]*q1;
-			q3ROIsSDNorm[n] = tempArraySDNorm[q3d]*(1-q3)+tempArraySDNorm[q3d+1]*q3;
-		}
-		
-	}
-	
-	if (slicesByStack != 1) {
-		
-		// Mean values normalized
-		for (i=1; i<=nbROI; i++){
-			tempROIArray = Array.slice(meanROI_Norm,(i-1)*slicesByStack,(i*slicesByStack));
-			for (n=0; n < slicesByStack; n++) {
-				setResult("mean"+i, n, tempROIArray[n]);
+	for (k = 1; k <= nbImages; k++) {
+		for (j = 0; j < nbROIsArray[k]-nbROIsArray[k-1]; j++){
+			tempNorm = meanROI_Norm[nbValuesTotArray[k-1]+j*nbSlicesArray[k-1]+normalizeSlice-1];
+			if (tempNorm == 0) {tempNorm = 1;} // prevent division by 0
+			for (n = nbValuesTotArray[k-1]+j*nbSlicesArray[k-1]; n < nbValuesTotArray[k-1]+(j+1)*nbSlicesArray[k-1]-1; n++) {
+				meanROI_Norm[n] /= tempNorm;
+				stdDevROI_Norm[n] /= tempNorm;
 			}
 		}
+	}
 	
-		// Standard deviation normalized
-		for (i=1; i<=nbROI; i++){
-			tempROIArray = Array.slice(stdDevROI_Norm,(i-1)*slicesByStack,(i*slicesByStack));
-			for (n=0; n < slicesByStack; n++) {
-				setResult("stdDev"+i, n, tempROIArray[n]);
+	if (nbSlicesMin == nbSlicesMax) {
+		slicesByStack = nbSlicesMin;
+		// Compute quartiles of regions of interest
+		q1 = (nbROI-1) * 0.25;
+		q1d = floor(q1);
+		q1 = q1 - q1d;
+		q3 = (nbROI-1) * 0.75;
+		q3d = floor(q3);
+		q3 = q3 - q3d;
+		q4 = nbROI-1;
+		
+		q0ROIs = newArray(slicesByStack);
+		q1ROIs = newArray(slicesByStack);
+		q2ROIs = newArray(slicesByStack);
+		q3ROIs = newArray(slicesByStack);
+		q4ROIs = newArray(slicesByStack);
+		
+		q0ROIsSD = newArray(slicesByStack);
+		q1ROIsSD = newArray(slicesByStack);
+		q2ROIsSD = newArray(slicesByStack);
+		q3ROIsSD = newArray(slicesByStack);
+		q4ROIsSD = newArray(slicesByStack);
+		
+		q0ROIsNorm = newArray(slicesByStack);
+		q1ROIsNorm = newArray(slicesByStack);
+		q2ROIsNorm = newArray(slicesByStack);
+		q3ROIsNorm = newArray(slicesByStack);
+		q4ROIsNorm = newArray(slicesByStack);
+		
+		q0ROIsSDNorm = newArray(slicesByStack);
+		q1ROIsSDNorm = newArray(slicesByStack);
+		q2ROIsSDNorm = newArray(slicesByStack);
+		q3ROIsSDNorm = newArray(slicesByStack);
+		q4ROIsSDNorm = newArray(slicesByStack);
+		
+		tempArray = newArray(nbROI);
+		tempArraySD = newArray(nbROI);
+		tempArrayNorm = newArray(nbROI);
+		tempArraySDNorm = newArray(nbROI);
+		for (n=0; n<slicesByStack; n++) {	
+			for (j=0; j<nbROI; j++) {
+				tempArray[j] = meanROI[j*slicesByStack+n];
+				tempArraySD[j] = stdDevROI[j*slicesByStack+n];
+				tempArrayNorm[j] = meanROI_Norm[j*slicesByStack+n];
+				tempArraySDNorm[j] = stdDevROI_Norm[j*slicesByStack+n];
+			}
+			Array.sort(tempArray);
+			Array.sort(tempArraySD);
+			Array.sort(tempArrayNorm);
+			Array.sort(tempArraySDNorm);
+			q0ROIs[n] = tempArray[0];
+			q0ROIsSD[n] = tempArraySD[0];
+			q0ROIsNorm[n] = tempArrayNorm[0];
+			q0ROIsSDNorm[n] = tempArraySDNorm[0];
+			q4ROIs[n] = tempArray[q4];
+			q4ROIsSD[n] = tempArraySD[q4];
+			q4ROIsNorm[n] = tempArrayNorm[q4];
+			q4ROIsSDNorm[n] = tempArraySDNorm[q4];
+			if (nbROI % 2 == 0) {
+				q2ROIs[n] = (tempArray[nbROI/2]+tempArray[nbROI/2-1])/2;
+				q2ROIsSD[n] = (tempArraySD[nbROI/2]+tempArraySD[nbROI/2-1])/2;
+				q2ROIsNorm[n] = (tempArrayNorm[nbROI/2]+tempArrayNorm[nbROI/2-1])/2;
+				q2ROIsSDNorm[n] = (tempArraySDNorm[nbROI/2]+tempArraySDNorm[nbROI/2-1])/2;
+			} else {
+				q2ROIs[n] = tempArray[(nbROI-1)/2];
+				q2ROIsSD[n] = tempArraySD[(nbROI-1)/2];
+				q2ROIsNorm[n] = tempArrayNorm[(nbROI-1)/2];
+				q2ROIsSDNorm[n] = tempArraySDNorm[(nbROI-1)/2];
+			}
+			if (q1 == 0) {
+				q1ROIs[n] = tempArray[q1d];
+				q3ROIs[n] = tempArray[q3d];
+				q1ROIsSD[n] = tempArraySD[q1d];
+				q3ROIsSD[n] = tempArraySD[q3d];
+				q1ROIsNorm[n] = tempArrayNorm[q1d];
+				q3ROIsNorm[n] = tempArrayNorm[q3d];
+				q1ROIsSDNorm[n] = tempArraySDNorm[q1d];
+				q3ROIsSDNorm[n] = tempArraySDNorm[q3d];
+			} else {
+				q1ROIs[n] = tempArray[q1d]*(1-q1)+tempArray[q1d+1]*q1;
+				q3ROIs[n] = tempArray[q3d]*(1-q3)+tempArray[q3d+1]*q3;
+				q1ROIsSD[n] = tempArraySD[q1d]*(1-q1)+tempArraySD[q1d+1]*q1;
+				q3ROIsSD[n] = tempArraySD[q3d]*(1-q3)+tempArraySD[q3d+1]*q3;
+				q1ROIsNorm[n] = tempArrayNorm[q1d]*(1-q1)+tempArrayNorm[q1d+1]*q1;
+				q3ROIsNorm[n] = tempArrayNorm[q3d]*(1-q3)+tempArrayNorm[q3d+1]*q3;
+				q1ROIsSDNorm[n] = tempArraySDNorm[q1d]*(1-q1)+tempArraySDNorm[q1d+1]*q1;
+				q3ROIsSDNorm[n] = tempArraySDNorm[q3d]*(1-q3)+tempArraySDNorm[q3d+1]*q3;
+			}
+		}
+	}
+	
+	if (nbSlicesMax != 1) {
+		
+		// Mean and standard deviation values normalized
+		i = 0;
+		for (k = 1; k <= nbImages; k++) {
+			for (j = 0; j < nbROIsArray[k]-nbROIsArray[k-1]; j++){
+				tempValue = nbValuesTotArray[k-1]+j*nbSlicesArray[k-1];
+				tempROIArray = Array.slice(meanROI_Norm, tempValue, tempValue + nbSlicesArray[k-1]);
+				i++;
+				for (n = 0; n < nbSlicesArray[k-1]; n++) {
+					setResult("mean"+i, n, tempROIArray[n]);
+				}
+			}
+		}
+		i = 0;
+		for (k = 1; k <= nbImages; k++) {
+			for (j = 0; j < nbROIsArray[k]-nbROIsArray[k-1]; j++){
+				tempValue = nbValuesTotArray[k-1]+j*nbSlicesArray[k-1];
+				tempROIArray = Array.slice(stdDevROI_Norm, tempValue, tempValue + nbSlicesArray[k-1]);
+				i++;
+				for (n = 0; n < nbSlicesArray[k-1]; n++) {
+					setResult("stdDev"+i, n, tempROIArray[n]);
+				}
 			}
 		}
 		
 		// Save normalized results
-		for (n=0; n<slicesByStack; n++) {
-			setResult("Min", n, q0ROIsNorm[n]);
-			setResult("1st quartile", n, q1ROIsNorm[n]);
-			setResult("Median", n, q2ROIsNorm[n]);
-			setResult("3rd quartile", n, q3ROIsNorm[n]);
-			setResult("Max", n, q4ROIsNorm[n]);
-			setResult("SD Min", n, q0ROIsSDNorm[n]);
-			setResult("SD 1st quartile", n, q1ROIsSDNorm[n]);
-			setResult("SD Median", n, q2ROIsSDNorm[n]);
-			setResult("SD 3rd quartile", n, q3ROIsSDNorm[n]);
-			setResult("SD Max", n, q4ROIsSDNorm[n]);
+		if (nbSlicesMin == nbSlicesMax) {
+			for (n=0; n<slicesByStack; n++) {
+				setResult("Min", n, q0ROIsNorm[n]);
+				setResult("1st quartile", n, q1ROIsNorm[n]);
+				setResult("Median", n, q2ROIsNorm[n]);
+				setResult("3rd quartile", n, q3ROIsNorm[n]);
+				setResult("Max", n, q4ROIsNorm[n]);
+				setResult("SD Min", n, q0ROIsSDNorm[n]);
+				setResult("SD 1st quartile", n, q1ROIsSDNorm[n]);
+				setResult("SD Median", n, q2ROIsSDNorm[n]);
+				setResult("SD 3rd quartile", n, q3ROIsSDNorm[n]);
+				setResult("SD Max", n, q4ROIsSDNorm[n]);
+			}
 		}
 		saveAs("Results", dataNormGraphPathCSV);
 		saveAs("Results", dataNormGraphPathXLS);
@@ -1412,135 +1564,148 @@ function makeRatioAnalysis() {
 		dataNormXLS = replace(dataNormXLS, ".", ",");
 		File.saveString(dataNormXLS, dataNormGraphPathXLS)
 		
+		if (nbSlicesMin == nbSlicesMax) {
+			// Graph quartiles of mean values normalized
+			Plot.create("Distribution of means (normalized data)", "Time (min)", "Distribution of means");
+			Plot.setColor("blue");
+			Plot.add("line", timeArray, q4ROIsNorm);
+			graphLegend = "Max";
+			Plot.setColor("green");
+			Plot.add("line", timeArray, q3ROIsNorm);
+			graphLegend += "\t3rd quartile";
+			Plot.setColor("red");
+			Plot.setLineWidth(2);
+			Plot.add("line", timeArray, q2ROIsNorm);
+			graphLegend += "\tMedian";
+			Plot.setColor("green");
+			Plot.setLineWidth(1);
+			Plot.add("line", timeArray, q1ROIsNorm);
+			graphLegend += "\t1st quartile";
+			Plot.setColor("blue");
+			Plot.add("line", timeArray, q0ROIsNorm);
+			graphLegend += "\tMin";
+			
+			Plot.setLegend(graphLegend);
+			Plot.show();
+			Plot.setLimitsToFit();
+			setLocation(0.70*screenWidth, 0.1*screenHeight);
+			
+			doubleTimeArray = Array.concat(timeArray, timeArrayReverse);
+			doubleTimeArray2 = Array.copy(doubleTimeArray);
+			q04ROIsNorm = Array.concat(q0ROIsNorm, Array.reverse(Array.copy(q4ROIsNorm)));
+			q13ROIsNorm = Array.concat(q1ROIsNorm, Array.reverse(Array.copy(q3ROIsNorm)));
+			
+			toUnscaled(doubleTimeArray, q13ROIsNorm); // Convert to image coordinates
+			makeSelection("polygon", doubleTimeArray, q13ROIsNorm);
+			changeValues(0xffffff, 0xffffff, 0x00ff00); // Change white to green
+			run("Select None");
+			toUnscaled(doubleTimeArray2, q04ROIsNorm); // Convert to image coordinates
+			makeSelection("polygon", doubleTimeArray2, q04ROIsNorm);
+			changeValues(0xffffff, 0xffffff, 0x0000ff); // Change white to blue
+			run("Select None");
+			
+			Plot.freeze();
+			
+			
+			// Graph quartiles of normalized standard deviation values
+			Plot.create("Distribution of standard deviations (normalized data)", "Time (min)", "Distribution of standard deviations");
+			Plot.setColor("blue");
+			Plot.add("line", timeArray, q4ROIsSDNorm);
+			graphLegend = "Max";
+			Plot.setColor("green");
+			Plot.add("line", timeArray, q3ROIsSDNorm);
+			graphLegend += "\t3rd quartile";
+			Plot.setColor("red");
+			Plot.setLineWidth(2);
+			Plot.add("line", timeArray, q2ROIsSDNorm);
+			graphLegend += "\tMedian";
+			Plot.setColor("green");
+			Plot.setLineWidth(1);
+			Plot.add("line", timeArray, q1ROIsSDNorm);
+			graphLegend += "\t1st quartile";
+			Plot.setColor("blue");
+			Plot.add("line", timeArray, q0ROIsSDNorm);
+			graphLegend += "\tMin";
+			
+			Plot.setLegend(graphLegend);
+			Plot.show();
+			Plot.setLimitsToFit();
+			setLocation(0.70*screenWidth, 0.5*screenHeight);
 		
-		// Graph quartiles of mean values normalized
-		Plot.create("Distribution of means (normalized data)", "Time (min)", "Distribution of means");
-		Plot.setColor("blue");
-		Plot.add("line", timeArray, q4ROIsNorm);
-		graphLegend = "Max";
-		Plot.setColor("green");
-		Plot.add("line", timeArray, q3ROIsNorm);
-		graphLegend += "\t3rd quartile";
-		Plot.setColor("red");
-		Plot.setLineWidth(2);
-		Plot.add("line", timeArray, q2ROIsNorm);
-		graphLegend += "\tMedian";
-		Plot.setColor("green");
-		Plot.setLineWidth(1);
-		Plot.add("line", timeArray, q1ROIsNorm);
-		graphLegend += "\t1st quartile";
-		Plot.setColor("blue");
-		Plot.add("line", timeArray, q0ROIsNorm);
-		graphLegend += "\tMin";
+			doubleTimeArray = Array.concat(timeArray, timeArrayReverse);
+			doubleTimeArray2 = Array.copy(doubleTimeArray);
+			q04ROIsSDNorm = Array.concat(q0ROIsSDNorm, Array.reverse(q4ROIsSDNorm));
+			q13ROIsSDNorm = Array.concat(q1ROIsSDNorm, Array.reverse(q3ROIsSDNorm));
 		
-		Plot.setLegend(graphLegend);
-		Plot.show();
-		Plot.setLimitsToFit();
-		setLocation(1360, 130);
+			toUnscaled(doubleTimeArray, q13ROIsSDNorm); // Convert to image coordinates
+			makeSelection("polygon", doubleTimeArray, q13ROIsSDNorm);
+			changeValues(0xffffff, 0xffffff, 0x00ff00); // Change white to green
+			run("Select None");
+			toUnscaled(doubleTimeArray2, q04ROIsSDNorm); // Convert to image coordinates
+			makeSelection("polygon", doubleTimeArray2, q04ROIsSDNorm);
+			changeValues(0xffffff, 0xffffff, 0x0000ff); // Change white to blue
+			run("Select None");
 		
-		doubleTimeArray = Array.concat(timeArray, timeArrayReverse);
-		doubleTimeArray2 = Array.copy(doubleTimeArray);
-		q04ROIsNorm = Array.concat(q0ROIsNorm, Array.reverse(Array.copy(q4ROIsNorm)));
-		q13ROIsNorm = Array.concat(q1ROIsNorm, Array.reverse(Array.copy(q3ROIsNorm)));
-		
-		toUnscaled(doubleTimeArray, q13ROIsNorm); // Convert to image coordinates
-		makeSelection("polygon", doubleTimeArray, q13ROIsNorm);
-		changeValues(0xffffff, 0xffffff, 0x00ff00); // Change white to green
-		run("Select None");
-		toUnscaled(doubleTimeArray2, q04ROIsNorm); // Convert to image coordinates
-		makeSelection("polygon", doubleTimeArray2, q04ROIsNorm);
-		changeValues(0xffffff, 0xffffff, 0x0000ff); // Change white to blue
-		run("Select None");
-		
-		Plot.freeze();
-		
-		
-		// Graph quartiles of normalized standard deviation values
-		Plot.create("Distribution of standard deviations (normalized data)", "Time (min)", "Distribution of standard deviations");
-		Plot.setColor("blue");
-		Plot.add("line", timeArray, q4ROIsSDNorm);
-		graphLegend = "Max";
-		Plot.setColor("green");
-		Plot.add("line", timeArray, q3ROIsSDNorm);
-		graphLegend += "\t3rd quartile";
-		Plot.setColor("red");
-		Plot.setLineWidth(2);
-		Plot.add("line", timeArray, q2ROIsSDNorm);
-		graphLegend += "\tMedian";
-		Plot.setColor("green");
-		Plot.setLineWidth(1);
-		Plot.add("line", timeArray, q1ROIsSDNorm);
-		graphLegend += "\t1st quartile";
-		Plot.setColor("blue");
-		Plot.add("line", timeArray, q0ROIsSDNorm);
-		graphLegend += "\tMin";
-		
-		Plot.setLegend(graphLegend);
-		Plot.show();
-		Plot.setLimitsToFit();
-		setLocation(1360, 480);
-	
-		doubleTimeArray = Array.concat(timeArray, timeArrayReverse);
-		doubleTimeArray2 = Array.copy(doubleTimeArray);
-		q04ROIsSDNorm = Array.concat(q0ROIsSDNorm, Array.reverse(q4ROIsSDNorm));
-		q13ROIsSDNorm = Array.concat(q1ROIsSDNorm, Array.reverse(q3ROIsSDNorm));
-	
-		toUnscaled(doubleTimeArray, q13ROIsSDNorm); // Convert to image coordinates
-		makeSelection("polygon", doubleTimeArray, q13ROIsSDNorm);
-		changeValues(0xffffff, 0xffffff, 0x00ff00); // Change white to green
-		run("Select None");
-		toUnscaled(doubleTimeArray2, q04ROIsSDNorm); // Convert to image coordinates
-		makeSelection("polygon", doubleTimeArray2, q04ROIsSDNorm);
-		changeValues(0xffffff, 0xffffff, 0x0000ff); // Change white to blue
-		run("Select None");
-	
-		Plot.freeze();
-		
+			Plot.freeze();
+		}
 		
 		// Graph mean values
 		Plot.create("Means", "Time (min)", "Mean");
 		graphLegend = "";
-		for (i=1; i<=nbROI; i++){
-			tempROIArray = Array.slice(meanROI,(i-1)*slicesByStack,(i*slicesByStack));
-			Plot.setColor(colors[(i-1)%10]);
-			Plot.add("line", timeArray, tempROIArray);
-			graphLegend = graphLegend + "ROI "+i+"\t";
-			for (n=0; n < slicesByStack; n++) {
-				setResult("mean"+i, n, tempROIArray[n]);
+		i = 0;
+		for (k = 1; k <= nbImages; k++) {
+			for (j = 0; j < nbROIsArray[k]-nbROIsArray[k-1]; j++){
+				tempValue = nbValuesTotArray[k-1]+j*nbSlicesArray[k-1];
+				tempROIArray = Array.slice(meanROI, tempValue, tempValue + nbSlicesArray[k-1]);
+				Plot.setColor(colors[i%10]);
+				i++;
+				Plot.add("line", timeArray, tempROIArray);
+				graphLegend = graphLegend + "ROI "+i+"\t";
+				for (n = 0; n < nbSlicesArray[k-1]; n++) {
+					setResult("mean"+i, n, tempROIArray[n]);
+				}
 			}
 		}
 		Plot.setLegend(graphLegend);
 		Plot.show();
 		Plot.setLimitsToFit();
-		setLocation(810, 130);
+		setLocation(0.40*screenWidth, 0.1*screenHeight);
 		
 		// Graph standard deviation
 		Plot.create("Standard deviations", "Time (min)", "Standard deviation");
-		for (i=1; i<=nbROI; i++){
-			tempROIArray = Array.slice(stdDevROI,(i-1)*slicesByStack,(i*slicesByStack));
-			Plot.setColor(colors[(i-1)%10]);
-			Plot.add("line", timeArray, tempROIArray);
-			for (n=0; n < slicesByStack; n++) {
-				setResult("stdDev"+i, n, tempROIArray[n]);
+		i = 0;
+		for (k = 1; k <= nbImages; k++) {
+			for (j = 0; j < nbROIsArray[k]-nbROIsArray[k-1]; j++){
+				tempValue = nbValuesTotArray[k-1]+j*nbSlicesArray[k-1];
+				tempROIArray = Array.slice(stdDevROI, tempValue, tempValue + nbSlicesArray[k-1]);
+				Plot.setColor(colors[i%10]);
+				Plot.add("line", timeArray, tempROIArray);
+				i++;
+				graphLegend = graphLegend + "ROI "+i+"\t";
+				for (n = 0; n < nbSlicesArray[k-1]; n++) {
+					setResult("stdDev"+i, n, tempROIArray[n]);
+				}
 			}
 		}
 		Plot.setLegend(graphLegend);
 		Plot.show();
 		Plot.setLimitsToFit();
-		setLocation(810, 480);
+		setLocation(0.40*screenWidth, 0.5*screenHeight);
 		
 		// Save results
-		for (n=0; n<slicesByStack; n++) {
-			setResult("Min", n, q0ROIs[n]);
-			setResult("1st quartile", n, q1ROIs[n]);
-			setResult("Median", n, q2ROIs[n]);
-			setResult("3rd quartile", n, q3ROIs[n]);
-			setResult("Max", n, q4ROIs[n]);
-			setResult("SD Min", n, q0ROIsSD[n]);
-			setResult("SD 1st quartile", n, q1ROIsSD[n]);
-			setResult("SD Median", n, q2ROIsSD[n]);
-			setResult("SD 3rd quartile", n, q3ROIsSD[n]);
-			setResult("SD Max", n, q4ROIsSD[n]);
+		if (nbSlicesMin == nbSlicesMax) {
+			for (n=0; n<slicesByStack; n++) {
+				setResult("Min", n, q0ROIs[n]);
+				setResult("1st quartile", n, q1ROIs[n]);
+				setResult("Median", n, q2ROIs[n]);
+				setResult("3rd quartile", n, q3ROIs[n]);
+				setResult("Max", n, q4ROIs[n]);
+				setResult("SD Min", n, q0ROIsSD[n]);
+				setResult("SD 1st quartile", n, q1ROIsSD[n]);
+				setResult("SD Median", n, q2ROIsSD[n]);
+				setResult("SD 3rd quartile", n, q3ROIsSD[n]);
+				setResult("SD Max", n, q4ROIsSD[n]);
+			}
 		}
 		
 		if (isOpen("Plot Values")) {
@@ -1549,11 +1714,11 @@ function makeRatioAnalysis() {
 		}
 	} else { // if (slicesByStack == 1)
 		for (i=1; i<=nbROI; i++){
-			tempROIArray = Array.slice(meanROI,(i-1)*slicesByStack,(i*slicesByStack));
+			tempROIArray = Array.slice(meanROI, i-1, i);
 			setResult("mean"+i, 0, tempROIArray[0]);
 		}
 		for (i=1; i<=nbROI; i++){
-			tempROIArray = Array.slice(stdDevROI_Norm,(i-1)*slicesByStack,(i*slicesByStack));
+			tempROIArray = Array.slice(stdDevROI_Norm, i-1, i*slicesByStack);
 			setResult("stdDev"+i, 0, tempROIArray[0]);
 		}
 		setResult("Min", 0, q0ROIs[0]);
@@ -1581,7 +1746,7 @@ function makeRatioAnalysis() {
 				setResult("Intensity2_"+(i+1), 0, intensityMeasures2[i]);
 			}
 		}
-		if (slicesByStack == 1) {
+		if (nbSlicesMax == 1) {
 			if (vsRatio) {
 				Plot.create("Ratio vs Intensity ratio", "Intensity ratio", "Ratio");
 			} else {
@@ -1610,18 +1775,23 @@ function makeRatioAnalysis() {
 			}
 			maxRatio = getResult("mean1",0);
 			minRatio = maxRatio;
-			newImage("test", "32-bit black", slicesByStack, 256, 1);
+			newImage("test", "32-bit black", nbSlicesMax, 256, 1);
 			selectWindow("test");
-			for (i = 1; i <= nbROI; i++) {
-				tempFluo = round((intensityMeasures[i-1]-minFluorescence)/(maxFluorescence-minFluorescence)*255);
-				for (j = 0; j < slicesByStack; j++) {
-					tempRes = getResult("mean"+i,j);
-					setPixel(j, tempFluo, tempRes);
-					if (tempRes < minRatio) {
-						minRatio = tempRes;
-					} else if (tempRes > maxRatio) {
-						maxRatio = tempRes;
+			
+			i = 1;
+			for (k = 1; k <= nbImages; k++) {
+				for (j = 0; j < nbROIsArray[k]-nbROIsArray[k-1]; j++){
+					tempFluo = round((intensityMeasures[i-1]-minFluorescence)/(maxFluorescence-minFluorescence)*255);
+					for (n = 0; n < nbSlicesArray[k-1]; n++) {
+						tempRes = getResult("mean"+i,n);
+						setPixel(n, tempFluo, tempRes);
+						if (tempRes < minRatio) {
+							minRatio = tempRes;
+						} else if (tempRes > maxRatio) {
+							maxRatio = tempRes;
+						}
 					}
+					i++;
 				}
 			}
 			run("Duplicate...", "title=3D");
@@ -1688,6 +1858,51 @@ function getParentAndFileName() {
 	parentFolderAndFileName = substring(filePath, lengthOf(parentPath)+1, lengthOf(filePath)-1)+" ____ "+fileName;
 	return parentFolderAndFileName;
 }
+// Replacement in version 0.29 to save the whole path and use relative path allowing more depth difference between files.
+function getSubPath(path, start, nbParts) {
+	partsArray = split(path, "\\\/");
+	if (nbParts < 0) { // If nbParts is negative, take the last -nbParts parts
+		nbParts = -nbParts;
+		start = partsArray.length-nbParts;
+	}
+	if (start < 0) {start = 0;}
+	if (start >= partsArray.length) {start = partsArray.length-1;}
+	if (nbParts == 0) {nbParts = partsArray.length-start;}
+	if (nbParts > partsArray.length-start) {nbParts = partsArray.length-start;}
+	res = partsArray[start];
+	for (i = start+1; i < start+nbParts; i++) {
+		res += File.separator+partsArray[i];
+	}
+	return res;
+}
+function getCommonStartPath(path1, path2) {
+	path1Array = split(path1, "\\\/");
+	path2Array = split(path2, "\\\/");
+	searchSize = minOf(path1Array.length, path2Array.length);
+	res=newArray(0, 0, 0);
+	while (res[0] < searchSize) {
+		if (path1Array[res[0]]==path2Array[res[0]]) res[0]++;
+		else break;
+	}
+	res[1] = path1Array.length-res[0];
+	res[2] = path2Array.length-res[0];
+	return res;
+}
+function samePaths(path1, path2) {
+	res = true;
+	path1Array = split(path1, "\\\/");
+	path2Array = split(path2, "\\\/");
+	if (path1Array.length == path2Array.length) {
+		for (i = 0; i < path1Array.length; i++) {
+			if (!matches(path1Array[i], path2Array[i])) {
+				res = false;
+			}
+		}
+	} else { 
+		res = false;
+	}
+	return res;
+}
 
 // **************************************************
 // Get roi manager names
@@ -1705,6 +1920,16 @@ function getRoiManagerNames() {
 		}
 	}
 	return roiManagerNames;
+}
+
+// **************************************************
+// Set Image Location based on ID
+// **************************************************
+function setLocImage(nbImages) {
+	setLocation(0.01*screenWidth*modulus(nbImages,33), 0.03*screenHeight*modulus(nbImages,18));
+}
+function modulus(a, b) {
+	return a-floor(a/b)*b;
 }
 
 // **************************************************
@@ -1760,15 +1985,33 @@ function getBgArea() {
 	return coord;
 }
 
+
 // **************************************************
-// Get all .tif containing "subString" in the first "depth"
+// Get extension size from a file path
+// **************************************************
+function getExtensionSize(filePath) {
+	lastName = File.getName(filePath);
+	if (lastIndexOf(lastName, ".") == -1) {
+		extensionSize = 0;
+	} else {
+		extensionSize = lengthOf(lastName)-lastIndexOf(lastName, ".");
+	}
+	return extensionSize;
+}
+
+// **************************************************
+// Get all files containing "subString" in the first "depth"
 // levels subfolders, from a selected folder
 // **************************************************
-function getTIF(subString, depth) {
+function getFiles(subString, depth, folderPath) {
 	resultList = newArray();
-	folder = getDirectory("Choose directory containing \""+subString+"\" images");
+	if (File.exists(folderPath)) {
+		path = folderPath;
+	} else { // if folderPath is invalid (eg on purpose ""), ask the user to choose a directory
+		path = getDirectory("Choose directory containing \""+subString+"\" images"); 
+	}
 	foldersList = newArray(1);
-	foldersList[0] = folder;
+	foldersList[0] = path;
 	for (k = 0; k < depth; k++) {
 		folders = Array.copy(foldersList);
 		foldersList = newArray();
@@ -1779,9 +2022,7 @@ function getTIF(subString, depth) {
 				if (File.isDirectory(fileList[j])) {
 					foldersList = Array.concat(foldersList, fileList[j]);
 				} else if (indexOf(File.getName(fileList[j]), subString)!=-1) {		// only files containing "subString"
-					if (endsWith(fileList[j], ".tif")) {							// only .tif images
-						resultList = Array.concat(resultList, fileList[j]);
-					}
+					resultList = Array.concat(resultList, fileList[j]);
 				}
 			}
 		}
@@ -1794,7 +2035,7 @@ function getTIF(subString, depth) {
 // in the first "depth" levels subfolders, from a selected folder
 // **************************************************
 function batchMinAndMax(subString, depth) {
-	fileList2 = getTIF(subString, depth);
+	fileList2 = getFiles(subString, depth, "");
 	fileList = newArray();
 	for (i = 0; i < fileList2.length; i++) {
 		if (endsWith(fileList2[i], ".tif")) {
@@ -1833,6 +2074,7 @@ function setParameters() {
 	Dialog.addMessage("Clean parameters:");
 	Dialog.setInsets(0, 20, 0);
 	Dialog.addCheckbox("Batch clean? (see Help)", batchClean);
+	Dialog.addCheckbox("Subtract background image?", subtractBackgroundImage);
 	Dialog.addCheckbox("Align stacks?", alignStacks);
 	
 	Dialog.setInsets(20, 20, 0);
@@ -1868,23 +2110,45 @@ function setParameters() {
 	
 	Dialog.show();
 	donorName = Dialog.getString();
+	call("ij.Prefs.set", "LRA.donorName", donorName);
 	acceptorName = Dialog.getString();
+	call("ij.Prefs.set", "LRA.acceptorName", acceptorName);
 	batchClean = Dialog.getCheckbox();
+	call("ij.Prefs.set", "LRA.batchClean", batchClean);
+	subtractBackgroundImage = Dialog.getCheckbox();
+	call("ij.Prefs.set", "LRA.subtractBackgroundImage", subtractBackgroundImage);
 	alignStacks = Dialog.getCheckbox();
+	call("ij.Prefs.set", "LRA.alignStacks", alignStacks);
 	batchCrop = Dialog.getCheckbox();
+	call("ij.Prefs.set", "LRA.batchCrop", batchCrop);
 	nameCROPs = Dialog.getCheckbox();
+	call("ij.Prefs.set", "LRA.nameCROPs", nameCROPs);
 	divideSelection = Dialog.getChoice();
+	call("ij.Prefs.set", "LRA.divideSelection", divideSelection);
 	batchDivide = Dialog.getCheckbox();
+	call("ij.Prefs.set", "LRA.batchDivide", batchDivide);
 	thresholdMethod = Dialog.getChoice();
+	call("ij.Prefs.set", "LRA.thresholdMethod", thresholdMethod);
 	coefMultMeanROI = Dialog.getNumber();
+	call("ij.Prefs.set", "LRA.coefMultMeanROI", coefMultMeanROI);
 	radiusLocalTh = Dialog.getNumber();
+	call("ij.Prefs.set", "LRA.radiusLocalTh", radiusLocalTh);
 	overallMinThreshold = Dialog.getNumber();
+	call("ij.Prefs.set", "LRA.overallMinThreshold", overallMinThreshold);
 	rangeMin = Dialog.getNumber();
+	call("ij.Prefs.set", "LRA.rangeMin", rangeMin);
 	rangeMax = Dialog.getNumber();
+	call("ij.Prefs.set", "LRA.rangeMax", rangeMax);
 	time_between_images_sec = Dialog.getNumber();
+	call("ij.Prefs.set", "LRA.time_between_images_sec", time_between_images_sec);
 	normalizeSlice = Dialog.getNumber();
+	call("ij.Prefs.set", "LRA.normalizeSlice", normalizeSlice);
 	saveROIs = Dialog.getCheckbox();
+	call("ij.Prefs.set", "LRA.saveROIs", saveROIs);
 	plot3D = Dialog.getChoice();
+	call("ij.Prefs.set", "LRA.plot3D", plot3D);
 	dataFolderName = Dialog.getString();
+	call("ij.Prefs.set", "LRA.dataFolderName", dataFolderName);
+	
 }
 
