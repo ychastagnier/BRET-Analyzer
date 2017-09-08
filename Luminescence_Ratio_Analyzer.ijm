@@ -1,4 +1,4 @@
-// Luminescence Ratio Analyzer version 0.29 (2017-05-03)
+// Luminescence Ratio Analyzer version 0.30 (2017-09-08)
 // by Yan Chastagnier
 
 // Put this macro into the folder Fiji.app/macros/toolsets/
@@ -9,7 +9,7 @@
 var donorName = call("ij.Prefs.get", "LRA.donorName", "LUC"); // Donor
 var acceptorName = call("ij.Prefs.get", "LRA.acceptorName", "YFP"); // Acceptor
 var batchClean = call("ij.Prefs.get", "LRA.batchClean", false); // Batch clean?
-var subtractBackgroundImage = call("ij.Prefs.get", "LRA.subtractBackgroundImage", true); // Subtract dark image taken without luminescence (offset + read noise + light pollution)?
+var subtractBackgroundImage = call("ij.Prefs.get", "LRA.subtractBackgroundImage", false); // Subtract dark image taken without luminescence (offset + read noise + light pollution)?
 var alignStacks = call("ij.Prefs.get", "LRA.alignStacks", true); // Align stacks?
 var batchCrop = call("ij.Prefs.get", "LRA.batchCrop", false); // Batch crop?
 var nameCROPs = call("ij.Prefs.get", "LRA.nameCROPs", true); // Give a label to CROPs?
@@ -23,7 +23,7 @@ var rangeMin = parseFloat(call("ij.Prefs.get", "LRA.rangeMin", 0.2)); // Min ran
 var rangeMax = parseFloat(call("ij.Prefs.get", "LRA.rangeMax", 2)); // Max range
 var time_between_images_sec = parseFloat(call("ij.Prefs.get", "LRA.time_between_images_sec", 30)); // Time between images (s)
 var normalizeSlice = parseFloat(call("ij.Prefs.get", "LRA.normalizeSlice", 5)); // Slice used to normalize
-var saveROIs = call("ij.Prefs.get", "LRA.saveROIs", true); // Save ROIs?
+var weightImage = call("ij.Prefs.get", "LRA.weightImage", false); // Display wieghted images?
 var plot3D = call("ij.Prefs.get", "LRA.plot3D", "No"); // Plot Ratio vs intensity?
 var dataFolderName = call("ij.Prefs.get", "LRA.dataFolderName", "data"); // Folder and data name
 
@@ -37,12 +37,25 @@ macro "Close everything Action Tool - B03 C059 T060dC Ta60dl Td60do T3f0ds Taf0d
 macro "Set default parameters Action Tool - B03 C059 T050dP T750da Te50dr T1f0da T8f0dm" {setParameters();}
 macro "Batch set min and max of Ratio images in a folder and its subfolders Action Tool - B03 C059 T050dM Tb50di Te50dn T0f0bM Taf0aa Tff0ax" {batchMinAndMax("Ratio", 2);}
 
-
 var nbROIsArray = newArray("0");
 var nbSlicesArray = newArray();
 var nbSlicesTotArray = newArray("0");
 var nbValuesTotArray = newArray("0");
 var path = "";
+var lateMacOSX = isLateMacOSX();
+function isLateMacOSX() {
+	res = false;
+	if (matches(getInfo("os.name"), "Mac OS X")) {
+		version = getInfo("os.version");
+		components = split(version, ".,");
+		if (lengthOf(components)>1) {
+			if (parseInt(components[1]) >= 11) {
+				res = true;
+			}
+		}
+	}
+	return res;
+}
 
 // **************************************************
 // Clean donor and acceptor images
@@ -52,7 +65,7 @@ function cleanImages() {
 		nbPass = 0;
 		imageList = newArray();
 		path = "";
-		while (nbPass < 2 && lengthOf(imageList) == 0) {
+		while (nbPass < 2 && lengthOf(imageList) == 0) { // look first in the folder itself if there are images, if not, look into subfolders.
 			nbPass++;
 			imageList2 = getFiles(donorName, nbPass, path);
 			for (i = 0; i < imageList2.length; i++) {
@@ -71,7 +84,8 @@ function cleanImages() {
 	} else {
 		// Dialogue window to choose image
 		imageList = newArray(1);
-		imageList[0] = File.openDialog("Select raw "+donorName+" image");
+		tempPath = chooseFile("Select raw "+donorName+" image");
+		imageList[0] = tempPath;
 	}
 	for (j = 0; j < imageList.length; j++) {
 		if (batchClean) {
@@ -94,7 +108,6 @@ function cleanImages() {
 				folderPath += "clean";
 			}
 		}
-		print(File.isDirectory(folderPath), folderPath);
 		if (!File.exists(folderPath)) {
 			File.makeDirectory(folderPath);
 		}
@@ -112,7 +125,7 @@ function cleanImages() {
 		}
 		if (index == -1 || !File.exists(acceptor)) {
 			// If acceptor image is not automatically found, ask user to choose it
-			acceptor = File.openDialog("Select raw "+acceptorName+" image");
+			acceptor = chooseFile("Select raw "+acceptorName+" image");
 		}
 		open(acceptor);
 		run("Enhance Contrast", "saturated=0.35");
@@ -121,8 +134,8 @@ function cleanImages() {
 		
 		if (subtractBackgroundImage && j==0) {
 			bgImageSmoothRadius = 10;
-			donorBG = File.openDialog("Select background image for "+donorName);
-			acceptorBG = File.openDialog("Select background image for "+acceptorName);
+			donorBG = chooseFile("Select background image for "+donorName);
+			acceptorBG = chooseFile("Select background image for "+acceptorName);
 			open(donorBG);
 			setLocation(0.03*screenWidth, 0.06*screenHeight);
 			if (nSlices > 1) {
@@ -234,70 +247,82 @@ function cleanImages() {
 		
 		// Align slices using TurboReg plugin to compute translation coordinates
 		if (alignStacks && nSlices != 1) {
-			selectWindow(donorName);
-			nbSlices=nSlices;
-			refSlice = floor(nbSlices/2); // Start alignment from the middle of the stack
-			setSlice(refSlice);
-			run("Duplicate...", "title=Source");
-			width = getWidth();
-			height = getHeight();
-			xcoord = newArray(nbSlices);
-			ycoord = newArray(nbSlices);
-			xcoord[refSlice]=0;
-			ycoord[refSlice]=0;
-			// Compute translations coordinates for first half of the stack
-			for (i = refSlice-1; i>0; i--) {
+			List.setCommands;
+			if (List.get("TurboReg ")!="") {
 				selectWindow(donorName);
-				setSlice(i);
-				showStatus("Computing Translation Correction "+(refSlice-i)+"/"+nbSlices);
-				run("Duplicate...", "title=Target");
-				run("TurboReg ","-align -window Source 0 0 "+(width-1)+" "+(height-1)+" -window Target 0 0 "+(width-1)+" "+(height-1)+
-					" -translation "+(width/2)+" "+(height/2)+" "+(width/2)+" "+(height/2)+" -hideOutput");
+				nbSlices=nSlices;
+				refSlice = floor(nbSlices/2); // Start alignment from the middle of the stack
+				setSlice(refSlice);
+				run("Duplicate...", "title=Source");
+				width = getWidth();
+				height = getHeight();
+				xcoord = newArray(nbSlices);
+				ycoord = newArray(nbSlices);
+				xcoord[refSlice]=0;
+				ycoord[refSlice]=0;
+				// Compute translations coordinates for first half of the stack
+				for (i = refSlice-1; i>0; i--) {
+					selectWindow(donorName);
+					setSlice(i);
+					showStatus("Computing Translation Correction "+(refSlice-i)+"/"+nbSlices);
+					run("Duplicate...", "title=Target");
+					run("TurboReg ","-align -window Source 0 0 "+(width-1)+" "+(height-1)+" -window Target 0 0 "+(width-1)+" "+(height-1)+
+						" -translation "+(width/2)+" "+(height/2)+" "+(width/2)+" "+(height/2)+" -hideOutput");
+					selectWindow("Source");
+					close();
+					selectWindow("Target");
+					rename("Source");
+					xcoord[i-1] = xcoord[i] + getResult("sourceX", 0)-getResult("targetX", 0);
+					ycoord[i-1] = ycoord[i] + getResult("sourceY", 0)-getResult("targetY", 0);
+				}
 				selectWindow("Source");
 				close();
-				selectWindow("Target");
-				rename("Source");
-				xcoord[i-1] = xcoord[i] + getResult("sourceX", 0)-getResult("targetX", 0);
-				ycoord[i-1] = ycoord[i] + getResult("sourceY", 0)-getResult("targetY", 0);
-			}
-			selectWindow("Source");
-			close();
-			selectWindow(donorName);
-			setSlice(refSlice);
-			run("Duplicate...", "title=Source");
-			// Compute translations coordinates for second half of the stack
-			for (i = refSlice+1; i<=nbSlices; i++) {
 				selectWindow(donorName);
-				setSlice(i);
-				showStatus("Computing Translation Correction "+i+"/"+nbSlices);
-				run("Duplicate...", "title=Target");
-				run("TurboReg ","-align -window Source 0 0 "+(width-1)+" "+(height-1)+" -window Target 0 0 "+(width-1)+" "+(height-1)+
-					" -translation "+(width/2)+" "+(height/2)+" "+(width/2)+" "+(height/2)+" -hideOutput");
+				setSlice(refSlice);
+				run("Duplicate...", "title=Source");
+				// Compute translations coordinates for second half of the stack
+				for (i = refSlice+1; i<=nbSlices; i++) {
+					selectWindow(donorName);
+					setSlice(i);
+					showStatus("Computing Translation Correction "+i+"/"+nbSlices);
+					run("Duplicate...", "title=Target");
+					run("TurboReg ","-align -window Source 0 0 "+(width-1)+" "+(height-1)+" -window Target 0 0 "+(width-1)+" "+(height-1)+
+						" -translation "+(width/2)+" "+(height/2)+" "+(width/2)+" "+(height/2)+" -hideOutput");
+					selectWindow("Source");
+					close();
+					selectWindow("Target");
+					rename("Source");
+					xcoord[i-1] = xcoord[i-2] + getResult("sourceX", 0)-getResult("targetX", 0);
+					ycoord[i-1] = ycoord[i-2] + getResult("sourceY", 0)-getResult("targetY", 0);
+				}
 				selectWindow("Source");
 				close();
-				selectWindow("Target");
-				rename("Source");
-				xcoord[i-1] = xcoord[i-2] + getResult("sourceX", 0)-getResult("targetX", 0);
-				ycoord[i-1] = ycoord[i-2] + getResult("sourceY", 0)-getResult("targetY", 0);
-			}
-			selectWindow("Source");
-			close();
-			
-			if (isOpen("Refined Landmarks")) {
-				selectWindow("Refined Landmarks");
-				run("Close");
-			}
-			
-			// Apply translations to both stacks
-			selectWindow(donorName);
-			for (i = 0; i<nbSlices; i++) {
-				setSlice(i+1);
-				run("Translate...", "x=" + round(xcoord[i]) + " y=" + round(ycoord[i]) + " interpolation=None slice");
-			}
-			selectWindow(acceptorName);
-			for (i = 0; i<nbSlices; i++) {
-				setSlice(i+1);
-				run("Translate...", "x=" + round(xcoord[i]) + " y=" + round(ycoord[i]) + " interpolation=None slice");
+				
+				if (isOpen("Refined Landmarks")) {
+					selectWindow("Refined Landmarks");
+					run("Close");
+				}
+				
+				// Apply translations to both stacks
+				selectWindow(donorName);
+				for (i = 0; i<nbSlices; i++) {
+					setSlice(i+1);
+					run("Translate...", "x=" + round(xcoord[i]) + " y=" + round(ycoord[i]) + " interpolation=None slice");
+				}
+				selectWindow(acceptorName);
+				for (i = 0; i<nbSlices; i++) {
+					setSlice(i+1);
+					run("Translate...", "x=" + round(xcoord[i]) + " y=" + round(ycoord[i]) + " interpolation=None slice");
+				}
+			} else {
+				Dialog.create("Plugin TurboReg not found");
+				Dialog.addMessage("The plugin to align images across a stack has not been found.");
+				Dialog.addMessage("Click OK to continue the process without aligning.");
+				Dialog.addMessage("Click Cancel to abord the process.");
+				Dialog.addMessage("Click Help to open the website where you can find the plugin.\nDownload the file according to your operating system "
+							+"(UNIX, Mac OS or Windows).\nFind the file TurboReg_.jar and place it in the folder Fiji.app/plugins/\nRestart Fiji to use it.");
+				Dialog.addHelp("http://bigwww.epfl.ch/thevenaz/turboreg/");
+				Dialog.show();
 			}
 		}
 		if (!batchClean) {
@@ -331,6 +356,14 @@ function cleanImages() {
 			rename(donorName+"_clean");
 		}
 	}
+	if (isOpen(donorName+"BackGround")) {
+		selectWindow(donorName+"BackGround");
+		close();
+	}
+	if (isOpen(acceptorName+"BackGround")) {
+		selectWindow(acceptorName+"BackGround");
+		close();
+	}
 	if (batchClean) {
 		if (lengthOf(imageList) == 0) {
 			print("No pairs of images were found with donorName", donorName, "and acceptorName", acceptorName, "in the selected folder.");
@@ -361,7 +394,7 @@ function cropImages() {
 			close();
 		}
 		if (!batchCrop) {
-			donor = File.openDialog("Select "+donorName+" image");
+			donor = chooseFile("Select "+donorName+" image");
 			imageList = Array.concat(imageList, donor);
 		} else {
 			imageList2 = getFiles("_clean.tif", 3, "");
@@ -407,7 +440,7 @@ function cropImages() {
 				acceptor = "";
 			}
 			if(!File.exists(acceptor)) {
-				acceptor = File.openDialog("Select clean acceptor image");
+				acceptor = chooseFile("Select clean acceptor image");
 			}
 			if (alreadyOpen) {
 				open(acceptor);
@@ -590,10 +623,10 @@ function makeRatioImage() {
 			close();
 		}
 		if (matches(divideSelection, "Image: Single")) { // Case select and process single image
-			donor = File.openDialog("Select clean "+donorName+" image");
+			donor = chooseFile("Select clean "+donorName+" image");
 			imageList = Array.concat(imageList, donor);
 		} else if (matches(divideSelection, "Image: Multi if CROP")) { // Case select image, process all CROPs if one is selected, else single image
-			donor = File.openDialog("Select clean "+donorName+" image");
+			donor = chooseFile("Select clean "+donorName+" image");
 			indexCROP = lastIndexOf(donor, "CROP");
 			index = lastIndexOf(donor, donorName);
 			if (indexCROP != -1) {
@@ -652,7 +685,7 @@ function makeRatioImage() {
 				acceptor = "";
 			}
 			if(!File.exists(acceptor)) {
-				acceptor = File.openDialog("Select clean acceptor image");
+				acceptor = chooseFile("Select clean acceptor image");
 			}
 			if (alreadyOpen) {
 				open(acceptor);
@@ -728,10 +761,8 @@ function makeRatioImage() {
 					imageCalculator("Subtract stack", donorName+"_test", "donor_test_li15");
 					imageCalculator("Subtract stack", "donor_test2", "donor_test_li5");
 					selectWindow(donorName+"_test");
-					//run("Median...", "radius=2 stack");
 					run("Auto Threshold", "method=Li white stack");
 					selectWindow("donor_test2");
-					//run("Median...", "radius=2 stack");
 					run("Auto Threshold", "method=Li white stack");
 					imageCalculator("AND stack", donorName+"_test","donor_test2");
 					selectWindow("donor_test_otsu");
@@ -1094,7 +1125,7 @@ function makeRatioAnalysis() {
 	}
 	
 	while (addImages) {
-		imageRatio = File.openDialog("Select Ratio image "+(nbImages+1));
+		imageRatio = chooseFile("Select Ratio image "+(nbImages+1));
 		imageRatioCopy = imageRatio;
 		if (endsWith(imageRatio, ".txt")) { // If the user selects a text file instead of an image, read the file to get the list of images to open
 			imagesList = split(File.openAsString(imageRatio),"\n");
@@ -1139,9 +1170,15 @@ function makeRatioAnalysis() {
 					if (!usetxt) {
 						nbNewROIs = roiManager("count");
 						selectWindow("Ratio"+IJ.pad(imageAlreadyOpen,2));
+						if (weightImage) {
+							buildWeightedImage();
+						}
 						title = "ROIs selection";
-						msg = "Image already open.\nAdd your regions (Ctrl+T) to the ROI manager on image Ratio"+IJ.pad(imageAlreadyOpen,2)+", then click \"OK\".";
-						waitForUser(title, msg);
+						msg = "Image already open.\nAdd your regions (Ctrl+T) to the ROI manager for image Ratio"+IJ.pad(imageAlreadyOpen,2)+", then click \"OK\".";
+						waitForUser(title, msg); // New regions selection
+						if (isOpen("Weighted")) {
+							close("Weighted");
+						}
 						nbNewROIs = roiManager("count") - nbNewROIs;
 						if (nbNewROIs > 0) {
 							for (i = 0; i < nbNewROIs; i++) {
@@ -1170,9 +1207,15 @@ function makeRatioAnalysis() {
 					}
 					
 					if (!usetxt) {
+						if (weightImage) {
+							buildWeightedImage();
+						}
 						title = "ROIs selection";
-						msg = msg+"Add your regions (Ctrl+T) to the ROI manager on image Ratio"+IJ.pad(nbImages,2)+", then click \"OK\".";
-						waitForUser(title, msg);
+						msg = msg+"Add your regions (Ctrl+T) to the ROI manager for image Ratio"+IJ.pad(nbImages,2)+", then click \"OK\".";
+						waitForUser(title, msg); // New regions selection
+						if (isOpen("Weighted")) {
+							close("Weighted");
+						}
 					}
 					roiNb = roiManager("count") - nbROIsArray[nbImages-1]; 
 					if (lengthOf(nbROIsArray) > nbImages) {
@@ -1213,7 +1256,6 @@ function makeRatioAnalysis() {
 		Dialog.addNumber("Time between images (s)", time_between_images_sec);
 		Dialog.addNumber("Slice to use for normalization", normalizeSlice);
 	}
-	Dialog.addCheckbox("Save ROIs?", saveROIs);
 	Dialog.addChoice("Plot Ratio vs intensity?", newArray("No", "Vs intensity", "Vs intensity ratio"), plot3D);
 	Dialog.addString("Folder and Data Name", dataFolderName, 18);
 	Dialog.addHelp("http://htmlpreview.github.com/?https://github.com/ychastagnier/LR-Analyzer/blob/master/help/analyse.html");
@@ -1224,8 +1266,6 @@ function makeRatioAnalysis() {
 		normalizeSlice = Dialog.getNumber();
 		call("ij.Prefs.set", "LRA.normalizeSlice", normalizeSlice);
 	}
-	saveROIs = Dialog.getCheckbox();
-	call("ij.Prefs.set", "LRA.saveROIs", saveROIs);
 	plot3D = Dialog.getChoice();
 	call("ij.Prefs.set", "LRA.plot3D", plot3D);
 	dataFolderName = Dialog.getString();
@@ -1252,7 +1292,7 @@ function makeRatioAnalysis() {
 	
 	nbROI = roiManager("count");	
 	// **************************************************
-	// 3D Plot Part 1/2 (measure)
+	// 3D Plot (vs Intensity (Ratio)) Part 1/2 (measure) 
 	// **************************************************
 	if (!matches(plot3D, "No")) {
 		run("Clear Results");
@@ -1260,19 +1300,77 @@ function makeRatioAnalysis() {
 		vsRatio = endsWith(plot3D, "ratio");
 		if (vsRatio) {
 			intensityMeasures2 = newArray(nbROI);
+			vIorvIR = "vIR";
+		} else {
+			vIorvIR = "vI";
 		}
 		for (i = 1; i <= nbImages; i++) {
 			selectWindow("Ratio"+IJ.pad(i,2));
+			imagePath = getInfo("image.directory")+getInfo("image.filename");
+			if (File.exists(imagePath)) {
+				extIndex = lastIndexOf(imagePath, ".");
+				if (extIndex == -1) {
+					extIndex = lengthOf(imagePath);
+				}
+				vsIntensityFolder = substring(imagePath, 0, extIndex)+"_vsIntensity"+File.separator;
+				File.makeDirectory(vsIntensityFolder);
+				vsIntensityPath = vsIntensityFolder+vIorvIR+"1.txt";
+				if (File.exists(vsIntensityPath)) {
+					str = File.openAsString(vsIntensityPath);
+					str = split(str, "( ____ )");
+					vsIntensityImagePath = vsIntensityFolder+str[0];
+					if (!File.exists(vsIntensityImagePath)) {
+						vsIntensityImagePath = chooseFile("Select intensity image 1 corresponding to Ratio"+IJ.pad(i,2));
+					}
+					open(vsIntensityImagePath);
+					rename("Intensity 1 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(nbROIsArray[i-1]+1,2));
+					setLocation(0.40*screenWidth, 0.1*screenHeight);
+				}
+				if (vsRatio) {
+					vsIntensityPath = vsIntensityFolder+vIorvIR+"2.txt";
+					if (File.exists(vsIntensityPath)) {
+						str = File.openAsString(vsIntensityPath);
+						str = split(str, "( ____ )");
+						vsIntensityImagePath = vsIntensityFolder+str[0];
+						if (!File.exists(vsIntensityImagePath)) {
+							vsIntensityImagePath = chooseFile("Select intensity image 2 corresponding to Ratio"+IJ.pad(i,2));
+						}
+						open(vsIntensityImagePath);
+						rename("Intensity 2 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(nbROIsArray[i-1]+1,2));
+						setLocation(0.45*screenWidth, 0.2*screenHeight);
+					}
+				}
+			} else {
+				vsIntensityFolder = " ";
+			}
 			for (j = nbROIsArray[i-1]; j < nbROIsArray[i]; j++) {
-				if (j == nbROIsArray[i-1]) {
-					open(File.openDialog("Select intensity image 1 corresponding to Ratio"+IJ.pad(i,2)));
+				selectWindow("Ratio"+IJ.pad(i,2));
+				roiManager("select", j);
+				
+				if (j == nbROIsArray[i-1] && !isOpen("Intensity 1 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+1,2))) {
+					int1FullPath = chooseFile("Select intensity image 1 corresponding to Ratio"+IJ.pad(i,2));
+					open(int1FullPath);
+					commonSize = getCommonStartPath(vsIntensityFolder, int1FullPath);
+					relativePath = "";
+					for (k = 0; k < commonSize[1]; k++) {
+						relativePath += ".."+File.separator;
+					}
+					relativePath = relativePath+getSubPath(int1FullPath, commonSize[0], commonSize[2])+" ____ ";
+					int1FullPathID = File.open(vsIntensityFolder+vIorvIR+"1.txt");
+					print(int1FullPathID, relativePath);
+					File.close(int1FullPathID);
 					rename("Intensity 1 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+1,2));
 					setLocation(0.40*screenWidth, 0.1*screenHeight);
 				} else {
 					selectWindow("Intensity 1 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+1,2));
 				}
-				roiManager("select", j);
-				roiManager("Deselect");
+				vsIntensityROIpath = vsIntensityFolder+vIorvIR+"1_"+(j-nbROIsArray[i-1]+1)+".txt";
+				if (File.exists(vsIntensityROIpath)) {
+					loadSelectionAsPoints(vsIntensityROIpath);
+				} else {
+					roiManager("select", j);
+					roiManager("deselect");
+				}
 				// User prompt to select fluorescent area
 				title = "Area selection";
 				msg = "Please select intensity area, then click \"OK\".";
@@ -1280,8 +1378,8 @@ function makeRatioAnalysis() {
 				if (isOpen("Intensity 1 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+1,2))) {
 					selectWindow("Intensity 1 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+1,2));
 				}
+				saveSelectionAsPoints(vsIntensityROIpath);
 				run("Measure");
-				run("Select None");
 				intensityMeasures[j] = round(getResult("Mean"));
 				if (j == nbROIsArray[i]-1) {
 					close();
@@ -1289,21 +1387,36 @@ function makeRatioAnalysis() {
 					rename("Intensity 1 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+2,2));
 				}
 				if (vsRatio) {
-					if (j == nbROIsArray[i-1]) {
-						open(File.openDialog("Select intensity image 2 corresponding to Ratio"+IJ.pad(i,2)));
+					if (j == nbROIsArray[i-1] && !isOpen("Intensity 2 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+1,2))) {
+						int2FullPath = chooseFile("Select intensity image 2 corresponding to Ratio"+IJ.pad(i,2));
+						open(int2FullPath);
+						commonSize = getCommonStartPath(vsIntensityFolder, int2FullPath);
+						relativePath = "";
+						for (k = 0; k < commonSize[1]; k++) {
+							relativePath += ".."+File.separator;
+						}
+						relativePath = relativePath+getSubPath(int2FullPath, commonSize[0], commonSize[2])+" ____ ";
+						int2FullPathID = File.open(vsIntensityFolder+vIorvIR+"2.txt");
+						print(int2FullPathID, relativePath);
+						File.close(int2FullPathID);
 						rename("Intensity 2 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+1,2));
 						setLocation(0.45*screenWidth, 0.2*screenHeight);
 					} else {
 						selectWindow("Intensity 2 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+1,2));
 					}
-					roiManager("select", j);
-					roiManager("Deselect");
+					vsIntensityROIpath = vsIntensityFolder+vIorvIR+"2_"+(j-nbROIsArray[i-1]+1)+".txt";
+					if (File.exists(vsIntensityROIpath)) {
+						loadSelectionAsPoints(vsIntensityROIpath);
+					} else {
+						roiManager("select", j);
+						roiManager("Deselect");
+					}
 					waitForUser(title, msg);
 					if (isOpen("Intensity 2 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+1,2))) {
 						selectWindow("Intensity 2 of Ratio"+IJ.pad(i,2)+"_"+IJ.pad(j+1,2));
 					}
+					saveSelectionAsPoints(vsIntensityROIpath);
 					run("Measure");
-					run("Select None");
 					intensityMeasures2[j] = round(getResult("Mean"));
 					if (j == nbROIsArray[i]-1) {
 						close();
@@ -1337,14 +1450,12 @@ function makeRatioAnalysis() {
 		normalizeSlice = 1;
 	}
 	fullIndex = Array.getSequence(nbROI+1);
-	if (saveROIs) {
-		for (k = 1; k <= nbImages; k++) {
-			selectWindow("Ratio"+IJ.pad(k,2));
-			roiPath = getROIPath();
-			indexes = Array.slice(fullIndex, nbROIsArray[k-1], nbROIsArray[k]);
-			roiManager("select", indexes)
-			roiManager("Save Selected", roiPath);
-		}
+	for (k = 1; k <= nbImages; k++) {
+		selectWindow("Ratio"+IJ.pad(k,2));
+		roiPath = getROIPath();
+		indexes = Array.slice(fullIndex, nbROIsArray[k-1], nbROIsArray[k]);
+		roiManager("select", indexes)
+		roiManager("Save Selected", roiPath);
 	}
 	
 	setBatchMode(true);
@@ -1418,7 +1529,7 @@ function makeRatioAnalysis() {
 		for (j = 0; j < nbROIsArray[k]-nbROIsArray[k-1]; j++){
 			tempNorm = meanROI_Norm[nbValuesTotArray[k-1]+j*nbSlicesArray[k-1]+normalizeSlice-1];
 			if (tempNorm == 0) {tempNorm = 1;} // prevent division by 0
-			for (n = nbValuesTotArray[k-1]+j*nbSlicesArray[k-1]; n < nbValuesTotArray[k-1]+(j+1)*nbSlicesArray[k-1]-1; n++) {
+			for (n = nbValuesTotArray[k-1]+j*nbSlicesArray[k-1]; n < nbValuesTotArray[k-1]+(j+1)*nbSlicesArray[k-1]; n++) {
 				meanROI_Norm[n] /= tempNorm;
 				stdDevROI_Norm[n] /= tempNorm;
 			}
@@ -1734,7 +1845,7 @@ function makeRatioAnalysis() {
 	}
 
 	// **************************************************
-	// 3D Plot Part 2/2
+	// 3D Plot (vs Intensity (Ratio)) Part 2/2 
 	// **************************************************
 	if (!matches(plot3D, "No")) {
 		for (i = 0; i < nbROI; i++) {
@@ -2008,7 +2119,7 @@ function getFiles(subString, depth, folderPath) {
 	if (File.exists(folderPath)) {
 		path = folderPath;
 	} else { // if folderPath is invalid (eg on purpose ""), ask the user to choose a directory
-		path = getDirectory("Choose directory containing \""+subString+"\" images"); 
+		path = chooseDirectory("Choose directory containing \""+subString+"\" images"); 
 	}
 	foldersList = newArray(1);
 	foldersList[0] = path;
@@ -2061,6 +2172,123 @@ function batchMinAndMax(subString, depth) {
 	setBatchMode(false);
 }
 
+
+
+// **************************************************
+// Functions to save and load area of 3D plot (vs Intensity (Ratio))
+// **************************************************
+function saveSelectionAsPoints(path) {
+	getSelectionCoordinates(xpoints, ypoints);
+	xString = ""+xpoints[0];
+	yString = ""+ypoints[0];
+	for (i = 1; i < xpoints.length; i++) {
+		xString += ";"+xpoints[i];
+		yString += ";"+ypoints[i];
+	}
+	s = getSliceNumber();
+	fileID = File.open(path);
+	print(fileID, s);
+	print(fileID, xString);
+	print(fileID, yString);
+	File.close(fileID);
+}
+function loadSelectionAsPoints(path) {
+	fileStr = File.openAsString(path);
+	lines = split(fileStr, "\n");
+	sliceNumber = parseInt(lines[0]);
+	if (sliceNumber < 1 || sliceNumber > nSlices) {
+		sliceNumber = 1;
+	}
+	setSlice(sliceNumber);
+	xpoints = split(lines[1], ";");
+	ypoints = split(lines[2], ";");
+	makeSelection("polygon",xpoints, ypoints);
+}
+
+// **************************************************
+// Build weighted image 
+// **************************************************
+function buildWeightedImage() {
+	imageID = getImageID();
+	imagePath = getInfo("image.directory")+getInfo("image.filename");
+	indice = lastIndexOf(imagePath, "Ratio");
+	if (indice > -1) {
+		weightPath = substring(imagePath, 0, indice)+donorName+"_clean"+substring(imagePath, indice+5, lengthOf(imagePath));
+	} else {
+		weightPath = "_";
+	}
+	if (!File.exists(weightPath)) {
+		weightPath = chooseFile("Select weight image");
+	}
+	open(weightPath);
+	setLocation(0.6*screenWidth, 0.15*screenHeight);
+	rename("Weight");
+	title = "Contrast";
+	message = "Adjust contrast on weight image then click OK.";
+	waitForUser(title, message);
+	setBatchMode(true);
+	selectImage(imageID);
+	run("Select None");
+	run("Duplicate...", "title=O duplicate");
+	run("RGB Color");
+	run("RGB Stack");
+	if (nSlices==1) {
+		run("Stack to Images");
+		selectWindow("Red");
+		rename("C1-O");
+		selectWindow("Green");
+		rename("C2-O");
+		selectWindow("Blue");
+		rename("C3-O");
+	} else {
+		run("Split Channels");
+	}
+	selectWindow("Weight");
+	run("8-bit"); // rescale to [0, 255] values
+	run("32-bit");
+	run("Macro...", "code=[v = v / 255] stack"); // rescale to [0, 1] values
+	for (i = 1; i <= 3; i++) {
+		selectWindow("C"+i+"-O");
+		run("32-bit");
+		imageCalculator("Multiply stack", "C"+i+"-O","Weight");
+	}
+	selectWindow("Weight");
+	close();
+	run("Merge Channels...", "c1=C1-O c2=C2-O c3=C3-O create");
+	run("RGB Color", "slices");
+	rename("Weighted");
+	setBatchMode(false);
+	setLocation(0.6*screenWidth, 0.15*screenHeight);
+}
+
+// **************************************************
+// Redefine getFile and getDirectory to behave differently on Mac OS X to prevent bugs in recent versions.
+// Mac OS X.11 : no titles for the windows of File.openDialog and getDirectory
+// Mac OS X.12 : getDirectory force to choose a file and append a slash to it...
+// **************************************************
+function chooseDirectory(title) {
+	if (lateMacOSX) {
+		setOption("JFileChooser", true);
+		dirPath = getDirectory(title);
+		setOption("JFileChooser", false);
+		if (matches(dirPath, "")) {exit;}
+	} else {
+		dirPath = getDirectory(title);
+	}
+	return dirPath;
+}
+function chooseFile(title) {
+	if (lateMacOSX) {
+		setOption("JFileChooser", true);
+		filePath = File.openDialog(title);
+		setOption("JFileChooser", false);
+		if (matches(filePath, "")) {exit;}
+	} else {
+		filePath = File.openDialog(title);
+	}
+	return filePath;
+}
+
 // **************************************************
 // Set default parameters
 // **************************************************
@@ -2100,9 +2328,9 @@ function setParameters() {
 	
 	Dialog.setInsets(20, 20, 0);
 	Dialog.addMessage("Analyse parameters:");
+	Dialog.addCheckbox("Display weighted images?", weightImage);
 	Dialog.addNumber("Time between images (s)", time_between_images_sec);
 	Dialog.addNumber("Slice used to normalize", normalizeSlice);
-	Dialog.addCheckbox("Save ROIs?", saveROIs);
 	Dialog.addChoice("Plot Ratio vs intensity?", newArray("No", "Vs intensity", "Vs intensity ratio"), plot3D);
 	Dialog.addString("Folder and data name", dataFolderName, 18);
 	
@@ -2139,12 +2367,12 @@ function setParameters() {
 	call("ij.Prefs.set", "LRA.rangeMin", rangeMin);
 	rangeMax = Dialog.getNumber();
 	call("ij.Prefs.set", "LRA.rangeMax", rangeMax);
+	weightImage = Dialog.getCheckbox();
+	call("ij.Prefs.set", "LRA.weightImage", weightImage);
 	time_between_images_sec = Dialog.getNumber();
 	call("ij.Prefs.set", "LRA.time_between_images_sec", time_between_images_sec);
 	normalizeSlice = Dialog.getNumber();
 	call("ij.Prefs.set", "LRA.normalizeSlice", normalizeSlice);
-	saveROIs = Dialog.getCheckbox();
-	call("ij.Prefs.set", "LRA.saveROIs", saveROIs);
 	plot3D = Dialog.getChoice();
 	call("ij.Prefs.set", "LRA.plot3D", plot3D);
 	dataFolderName = Dialog.getString();
