@@ -1,4 +1,4 @@
-// Luminescence Ratio Analyzer version 0.30 (2017-09-08)
+// BRET Analyzer version 0.31 (2017-11-20)
 // by Yan Chastagnier
 
 // Put this macro into the folder Fiji.app/macros/toolsets/
@@ -186,7 +186,7 @@ function cleanImages() {
 			// Ask the user if he wants to align images
 			Dialog.create("Align");
 			Dialog.addCheckbox("Align images?", alignStacks);
-			Dialog.addHelp("http://htmlpreview.github.com/?https://github.com/ychastagnier/LR-Analyzer/blob/master/help/align.html");
+			Dialog.addHelp("http://htmlpreview.github.com/?https://github.com/ychastagnier/BRET-Analyzer/blob/master/help/align.html");
 			Dialog.show();
 			alignStacks = Dialog.getCheckbox();
 			call("ij.Prefs.set", "LRA.alignStacks", alignStacks);
@@ -863,7 +863,7 @@ function makeRatioImage() {
 				Dialog.addNumber("Coefficient", coefMultMeanROI);
 				Dialog.addNumber("AutoLocalTh radius", radiusLocalTh);
 				Dialog.addNumber("Minimum threshold", overallMinThreshold);
-				Dialog.addHelp("http://htmlpreview.github.com/?https://github.com/ychastagnier/LR-Analyzer/blob/master/help/threshold.html");
+				Dialog.addHelp("http://htmlpreview.github.com/?https://github.com/ychastagnier/BRET-Analyzer/blob/master/help/threshold.html");
 				Dialog.addCheckbox("Update Threshold Settings?", updateThreshold);
 				Dialog.show();
 				thresholdMethod = Dialog.getChoice();
@@ -1258,7 +1258,7 @@ function makeRatioAnalysis() {
 	}
 	Dialog.addChoice("Plot Ratio vs intensity?", newArray("No", "Vs intensity", "Vs intensity ratio"), plot3D);
 	Dialog.addString("Folder and Data Name", dataFolderName, 18);
-	Dialog.addHelp("http://htmlpreview.github.com/?https://github.com/ychastagnier/LR-Analyzer/blob/master/help/analyse.html");
+	Dialog.addHelp("http://htmlpreview.github.com/?https://github.com/ychastagnier/BRET-Analyzer/blob/master/help/analyse.html");
 	Dialog.show();
 	if (nbSlicesMax > 1) {
 		time_between_images_sec = Dialog.getNumber();
@@ -2228,11 +2228,12 @@ function buildWeightedImage() {
 	waitForUser(title, message);
 	setBatchMode(true);
 	selectImage(imageID);
+	nbSlices = nSlices;
 	run("Select None");
 	run("Duplicate...", "title=O duplicate");
 	run("RGB Color");
 	run("RGB Stack");
-	if (nSlices==1) {
+	if (nbSlices==1) {
 		run("Stack to Images");
 		selectWindow("Red");
 		rename("C1-O");
@@ -2240,13 +2241,48 @@ function buildWeightedImage() {
 		rename("C2-O");
 		selectWindow("Blue");
 		rename("C3-O");
+		selectWindow("Weight");
+		run("8-bit"); // rescale to [0, 255] values
+		run("32-bit");
+		run("Macro...", "code=[v = v / 255] stack"); // rescale to [0, 1] values
 	} else {
 		run("Split Channels");
+		selectWindow("Weight");
+		nbSlices = nSlices;
+		getMinAndMax(minVal, maxVal);
+		sliceNumber = getSliceNumber();
+		getRawStatistics(temp, temp, temp, temp, temp, histogram);
+		valuesBelow = 0;
+		valuesAbove = 0;
+		for (i = 0; i <= minVal; i++) {
+			valuesBelow += histogram[i];
+		}
+		for (i = maxVal; i < histogram.length; i++) {
+			valuesAbove += histogram[i];
+		}
+		minArray = newArray(nbSlices);
+		maxArray = newArray(nbSlices);
+		for (j = 0; j < nbSlices; j++) {
+			setSlice(j+1);
+			getRawStatistics(temp, temp, temp, temp, temp, histogram);
+			valuesBelow2 = 0;
+			for (i = 0; valuesBelow2 <= valuesBelow; i++) {
+				valuesBelow2 += histogram[i];
+			}
+			minArray[j] = i;
+			valuesAbove2 = 0;
+			for (i = histogram.length-1; valuesAbove2 <= valuesAbove; i--) {
+				valuesAbove2 += histogram[i];
+			}
+			maxArray[j] = i;
+		}
+		run("32-bit");
+		for (i = 0; i < nbSlices; i++) {
+			setSlice(i+1);
+			run("Subtract...", "value="+minArray[i]+" slice");
+			run("Macro...", "code=[if (v < "+maxArray[i]-minArray[i]+") v = v/"+maxArray[i]-minArray[i]+"; else v = 1;] slice");
+		}
 	}
-	selectWindow("Weight");
-	run("8-bit"); // rescale to [0, 255] values
-	run("32-bit");
-	run("Macro...", "code=[v = v / 255] stack"); // rescale to [0, 1] values
 	for (i = 1; i <= 3; i++) {
 		selectWindow("C"+i+"-O");
 		run("32-bit");
@@ -2334,7 +2370,7 @@ function setParameters() {
 	Dialog.addChoice("Plot Ratio vs intensity?", newArray("No", "Vs intensity", "Vs intensity ratio"), plot3D);
 	Dialog.addString("Folder and data name", dataFolderName, 18);
 	
-	Dialog.addHelp("http://htmlpreview.github.com/?https://github.com/ychastagnier/LR-Analyzer/blob/master/help/param.html");
+	Dialog.addHelp("http://htmlpreview.github.com/?https://github.com/ychastagnier/BRET-Analyzer/blob/master/help/param.html");
 	
 	Dialog.show();
 	donorName = Dialog.getString();
