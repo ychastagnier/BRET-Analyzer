@@ -1,4 +1,4 @@
-// BRET Analyzer version 0.31 (2017-11-20)
+// BRET Analyzer version 0.32 (2019-01-04)
 // by Yan Chastagnier
 
 // Put this macro into the folder Fiji.app/macros/toolsets/
@@ -1229,7 +1229,7 @@ function makeRatioAnalysis() {
 						nbValuesTotArray = Array.concat(nbValuesTotArray, roiNb*nSlices+nbValuesTotArray[nbImages-1]);
 						nbSlicesArray = Array.concat(nbSlicesArray, nSlices);
 					}
-					if (nbROIsArray[nbImages]-nbROIsArray[nbImages-1]==0) {
+					if ((nbROIsArray[nbImages])-(nbROIsArray[nbImages-1]) == 0) {
 						close();
 						nbImages--;
 						showMessage("Image closed", "The image was closed because no regions were selected on it.");
@@ -1474,7 +1474,7 @@ function makeRatioAnalysis() {
 			Overlay.addSelection("blue", 2)
 			Overlay.drawString(1+indexes[i], x+width/2-5-6*(floor(log(1+indexes[i])/log(10))), y+height/2+10);
 		}
-		if (nbROIsArray[k]-nbROIsArray[k-1]==1) {
+		if ((nbROIsArray[k])-(nbROIsArray[k-1])==1) {
 			saveAs("png", dataFolderPath+"Image"+k+"_ROI"+nbROIsArray[k]);
 		} else {
 			saveAs("png", dataFolderPath+"Image"+k+"_ROI"+(nbROIsArray[k-1]+1)+"-"+nbROIsArray[k]);
@@ -1633,7 +1633,7 @@ function makeRatioAnalysis() {
 		i = 0;
 		for (k = 1; k <= nbImages; k++) {
 			for (j = 0; j < nbROIsArray[k]-nbROIsArray[k-1]; j++){
-				tempValue = nbValuesTotArray[k-1]+j*nbSlicesArray[k-1];
+				tempValue = 0+nbValuesTotArray[k-1]+j*nbSlicesArray[k-1];
 				tempROIArray = Array.slice(meanROI_Norm, tempValue, tempValue + nbSlicesArray[k-1]);
 				i++;
 				for (n = 0; n < nbSlicesArray[k-1]; n++) {
@@ -1644,7 +1644,7 @@ function makeRatioAnalysis() {
 		i = 0;
 		for (k = 1; k <= nbImages; k++) {
 			for (j = 0; j < nbROIsArray[k]-nbROIsArray[k-1]; j++){
-				tempValue = nbValuesTotArray[k-1]+j*nbSlicesArray[k-1];
+				tempValue = 0+nbValuesTotArray[k-1]+j*nbSlicesArray[k-1];
 				tempROIArray = Array.slice(stdDevROI_Norm, tempValue, tempValue + nbSlicesArray[k-1]);
 				i++;
 				for (n = 0; n < nbSlicesArray[k-1]; n++) {
@@ -1766,7 +1766,7 @@ function makeRatioAnalysis() {
 		i = 0;
 		for (k = 1; k <= nbImages; k++) {
 			for (j = 0; j < nbROIsArray[k]-nbROIsArray[k-1]; j++){
-				tempValue = nbValuesTotArray[k-1]+j*nbSlicesArray[k-1];
+				tempValue = 0+nbValuesTotArray[k-1]+j*nbSlicesArray[k-1];
 				tempROIArray = Array.slice(meanROI, tempValue, tempValue + nbSlicesArray[k-1]);
 				Plot.setColor(colors[i%10]);
 				i++;
@@ -1787,7 +1787,7 @@ function makeRatioAnalysis() {
 		i = 0;
 		for (k = 1; k <= nbImages; k++) {
 			for (j = 0; j < nbROIsArray[k]-nbROIsArray[k-1]; j++){
-				tempValue = nbValuesTotArray[k-1]+j*nbSlicesArray[k-1];
+				tempValue = 0+nbValuesTotArray[k-1]+j*nbSlicesArray[k-1];
 				tempROIArray = Array.slice(stdDevROI, tempValue, tempValue + nbSlicesArray[k-1]);
 				Plot.setColor(colors[i%10]);
 				Plot.add("line", timeArray, tempROIArray);
@@ -2280,7 +2280,7 @@ function buildWeightedImage() {
 		for (i = 0; i < nbSlices; i++) {
 			setSlice(i+1);
 			run("Subtract...", "value="+minArray[i]+" slice");
-			run("Macro...", "code=[if (v < "+maxArray[i]-minArray[i]+") v = v/"+maxArray[i]-minArray[i]+"; else v = 1;] slice");
+			run("Macro...", "code=[if (v < "+(maxArray[i]-minArray[i])+") v = v/"+(maxArray[i]-minArray[i])+"; else v = 1;] slice");
 		}
 	}
 	for (i = 1; i <= 3; i++) {
