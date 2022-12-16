@@ -2,6 +2,7 @@ import ij.IJ;
 import ij.ImageJ;
 import ij.WindowManager;
 import ij.ImagePlus;
+import ij.ImageStack;
 import ij.gui.DialogListener;
 import ij.gui.GenericDialog;
 import ij.gui.ImageWindow;
@@ -16,6 +17,7 @@ import ij.io.OpenDialog;
 import ij.io.FileSaver;
 import ij.measure.ResultsTable;
 import ij.Prefs;
+import ij.process.ByteProcessor;
 import ij.process.ColorProcessor;
 import ij.process.FloatPolygon;
 import ij.process.ImageStatistics;
@@ -156,7 +158,7 @@ class BRETAnalyzerProcess implements ActionListener, WindowListener {
 	
 	public void getFrame() {
 		if (frame == null) {
-			frame = new Frame("BRET Analyzer");
+			frame = new Frame("BRET Analyzer (v1.0.8)");
 			donorName = Prefs.get("BRETa.donorName", "LUC");
 			acceptorName = Prefs.get("BRETa.acceptorName", "YFP");
 			cleanParms = new CleanParameters();
@@ -1210,7 +1212,8 @@ class DivideProcess implements Runnable, DialogListener {
 	private String ratioPath;
 	private StringBuilder sb;
 	private DivideParameters divideParms;
-	private boolean preview;
+	private final String[] previewChoices = {"No", "Current donor slice", "Stack"};
+	private String preview = previewChoices[0];
 	private ImagePlus donorImg;
 	private ImagePlus acceptorImg;
 	private ImagePlus donorMaskImg;
@@ -1307,7 +1310,7 @@ class DivideProcess implements Runnable, DialogListener {
 				gd.addNumericField("Minimum threshold", divideParms.overallMinThreshold, 0);
 				gd.addNumericField("Ratio_range_min", divideParms.rangeMin, 2);
 				gd.addNumericField("Ratio_range_max", divideParms.rangeMax, 2);
-				gd.addCheckbox("Preview", false);
+				gd.addChoice("Preview", previewChoices, preview);
 				gd.setAlwaysOnTop(true);
 				gd.addDialogListener(this);
 				setVisibleItems(gd);
@@ -1318,7 +1321,7 @@ class DivideProcess implements Runnable, DialogListener {
 				Prefs.set("BRETa.divideDiaPosX", divideDiaPosX);
 				Prefs.set("BRETa.divideDiaPosY", divideDiaPosY);
 				if (!gd.wasCanceled()) {
-					threshold();
+					threshold(false);
 				}
 				if (ratioWin != null && ratioWin.isVisible()) {
 					ratioPosX = ratioWin.getLocation().getX();
@@ -1352,7 +1355,7 @@ class DivideProcess implements Runnable, DialogListener {
 					break;
 				}
 			} else {
-				threshold();
+				threshold(false);
 			}
 			IJ.saveString(thUsed, thPath);
 			if (ratioImg.isStack()) {
@@ -1389,9 +1392,13 @@ class DivideProcess implements Runnable, DialogListener {
 		divideParms.overallMinThreshold = (double)gd.getNextNumber();
 		divideParms.rangeMin = (double)gd.getNextNumber();
 		divideParms.rangeMax = (double)gd.getNextNumber();
-		preview = gd.getNextBoolean();
-		if (preview && !divideParms.batchDivide) {
-			threshold();
+		preview = gd.getNextChoice();
+		if (!preview.equals(previewChoices[0]) && !divideParms.batchDivide) {
+			if (preview.equals(previewChoices[1])) {
+				threshold(true);
+			} else {
+				threshold(false);
+			}
 			if (donorThWin == null) {
 				ImageWindow.setNextLocation((int)donorThPosX, (int)donorThPosY);
 				donorThImg.show();
@@ -1498,7 +1505,7 @@ class DivideProcess implements Runnable, DialogListener {
 		gd.pack();
 	}
 	
-	private void threshold() {
+	private void threshold(boolean singleSlice) {
 		sb = new StringBuilder();
 		sb.append(divideParms.thresholdMethod+"\n");
 		int currentSlice[] = {donorImg.getCurrentSlice(),donorThImg.getCurrentSlice(),ratioImg.getCurrentSlice()};
@@ -1506,8 +1513,13 @@ class DivideProcess implements Runnable, DialogListener {
 		if (currentRoi != null) {
 			donorImg.deleteRoi();
 		}
-		donorMaskImg = donorImg.duplicate();
-		donorThImg = donorImg.duplicate();
+		if (singleSlice) {
+			donorMaskImg = donorImg.crop();
+			donorThImg = donorImg.crop();
+		} else {
+			donorMaskImg = donorImg.duplicate();
+			donorThImg = donorImg.duplicate();
+		}
 		if (currentRoi != null) {
 			donorImg.restoreRoi();
 		}
@@ -1528,20 +1540,52 @@ class DivideProcess implements Runnable, DialogListener {
 				sb.append(divideParms.chastagnierGaussianLow+"\n"+divideParms.chastagnierGaussianHigh+"\n");
 			} else {
 				String method = divideParms.thresholdMethod.substring(7);
-				IJ.resetMinAndMax(donorMaskImg);
+				Double minSlice, maxSlice;
+				for (int iSlice = 1; iSlice <= donorMaskImg.getNSlices(); iSlice++) {
+					donorMaskImg.setSlice(iSlice);
+					IJ.resetMinAndMax(donorMaskImg);
+					IJ.run(donorMaskImg, "Enhance Contrast", "saturated=0.35");
+					minSlice = donorMaskImg.getDisplayRangeMin();
+					maxSlice = donorMaskImg.getDisplayRangeMax();
+					IJ.run(donorMaskImg, "Subtract...", "value="+minSlice+" slice");
+					IJ.run(donorMaskImg, "Divide...", "value="+(maxSlice-minSlice)/255+" slice");
+				}
+				donorMaskImg.setDisplayRange(0, 255);
 				IJ.run(donorMaskImg, "8-bit", "");
 				IJ.run(donorMaskImg, BRETAnalyzerProcess.autoThCmd, "method="+method+" ignore_black ignore_white white stack");
 			}
 			IJ.run(donorMaskImg, "Divide...", "value=255 stack");
-			donorThImg = ic.run("Multiply create stack", donorImg, donorMaskImg);
+			if (singleSlice) {
+				if (currentRoi != null) donorImg.deleteRoi();
+				donorThImg = ic.run("Multiply create", donorImg.crop(), donorMaskImg);
+				if (currentRoi != null) donorImg.restoreRoi();
+			} else {
+				donorThImg = ic.run("Multiply create stack", donorImg, donorMaskImg);
+			}
 		} else if (divideParms.thresholdMethod.startsWith("AutoLocalTh")) {
 			String method = divideParms.thresholdMethod.substring(12);
-			IJ.resetMinAndMax(donorMaskImg);
+			Double minSlice, maxSlice;
+			for (int iSlice = 1; iSlice <= donorMaskImg.getNSlices(); iSlice++) {
+				donorMaskImg.setSlice(iSlice);
+				IJ.resetMinAndMax(donorMaskImg);
+				IJ.run(donorMaskImg, "Enhance Contrast", "saturated=0.35");
+				minSlice = donorMaskImg.getDisplayRangeMin();
+				maxSlice = donorMaskImg.getDisplayRangeMax();
+				IJ.run(donorMaskImg, "Subtract...", "value="+minSlice+" slice");
+				IJ.run(donorMaskImg, "Divide...", "value="+(maxSlice-minSlice)/255+" slice");
+			}
+			donorMaskImg.setDisplayRange(0, 255);
 			IJ.run(donorMaskImg, "8-bit", "");
 			IJ.run(donorMaskImg, BRETAnalyzerProcess.autoLocThCmd, "method="+method+" radius="+divideParms.radiusLocalTh
 					+" parameter_1="+divideParms.localThParm1+" parameter_2="+divideParms.localThParm2+" white stack");
 			IJ.run(donorMaskImg, "Divide...", "value=255 stack");
-			donorThImg = ic.run("Multiply create stack", donorImg, donorMaskImg);
+			if (singleSlice) {
+				if (currentRoi != null) donorImg.deleteRoi();
+				donorThImg = ic.run("Multiply create", donorImg.crop(), donorMaskImg);
+				if (currentRoi != null) donorImg.restoreRoi();
+			} else {
+				donorThImg = ic.run("Multiply create stack", donorImg, donorMaskImg);
+			}
 			sb.append(divideParms.localThParm1+"\n"+divideParms.localThParm2+"\n"+divideParms.radiusLocalTh+"\n");
 		} else {
 			ip = donorThImg.getProcessor();
@@ -1597,12 +1641,33 @@ class DivideProcess implements Runnable, DialogListener {
 				}
 			}
 		}
-		donorImg.setSliceWithoutUpdate(currentSlice[1]);
-		donorThImg.setSliceWithoutUpdate(currentSlice[1]);
-		ratioImg = ic.run("Divide create 32-bit stack", acceptorImg, donorThImg);
+		if (singleSlice) {
+			donorImg.setSlice(currentSlice[0]);
+			acceptorImg.setSlice(currentSlice[0]);
+			ratioImg = ic.run("Divide create 32-bit stack", acceptorImg.crop(), donorThImg);
+		} else {
+			donorImg.setSliceWithoutUpdate(currentSlice[0]);
+			donorThImg.setSliceWithoutUpdate(currentSlice[1]);
+			ratioImg = ic.run("Divide create 32-bit stack", acceptorImg, donorThImg);
+		}
 		ratioImg.setTitle("Ratio");
+		ip = ratioImg.getProcessor();
+		float v;
+		for (int z=1; z<=ratioImg.getStackSize();z++) {
+			ratioImg.setSliceWithoutUpdate(z);
+			for (int y=0; y<ratioImg.getHeight(); y++) {
+				for (int x=0; x<ratioImg.getWidth(); x++) {
+					v = ip.getPixelValue(x,y);
+					if (v>=1000 || v<=0.01) {
+						ip.putPixelValue(x, y, Float.NaN);
+					}
+				}
+			}
+		}
 		ratioImg.setLut(LutLoader.openLut(IJ.getDirectory("luts")+"16_colors.lut"));
-		ratioImg.setSliceWithoutUpdate(currentSlice[2]);
+		if (!singleSlice) {
+			ratioImg.setSliceWithoutUpdate(currentSlice[2]);
+		}
 		IJ.setMinAndMax(ratioImg, divideParms.rangeMin, divideParms.rangeMax);
 		Prefs.set("BRETa.rangeMin", divideParms.rangeMin);
 		Prefs.set("BRETa.rangeMax", divideParms.rangeMax);
@@ -1647,16 +1712,16 @@ class AnalyseProcess implements Runnable, ActionListener, TextListener, ItemList
 	private double resultsPosY = Prefs.get("BRETa.resultsPosY", 200);
 	private Window meansPlotWin, sdPlotWin, resultsWin;
 	protected Thread t = new Thread(this);
-	private String donorName = null;
-	@SuppressWarnings("unused")
-	private String acceptorName = null;
+	private ImageCalculator ic = new ImageCalculator();
+	private static String donorName = null;
+	private static String acceptorName = null;
 	private double period_sec = Prefs.get("BRETa.period_sec", 60);
 	//private int normalizeSlice = (int)Prefs.get("BRETa.normalizeSlice", 1);
 	private String dataFolderName = Prefs.get("BRETa.dataFolderName", "data");
 	private final String[] ratioVsIntensityChoices = {"vs intensity", "vs intensity ratio"};
 	private String ratioVsIntensityChoice = Prefs.get("BRETa.ratioVsIntensityChoice", "vs intensity");
-	private ResultsTable[] rt;
-	private ImageStatistics istat;
+	private ResultsTable[] rt, rt2;
+	//private ImageStatistics istat;
 	private Plot means, stdDevs;
 	private final String[] plotColors = {"black","blue","green","magenta","orange","red","yellow","gray","cyan","pink"};
 	
@@ -1693,8 +1758,8 @@ class AnalyseProcess implements Runnable, ActionListener, TextListener, ItemList
 	}
 	
 	public void update(String donorName, String acceptorName) {
-		this.donorName = donorName;
-		this.acceptorName = acceptorName;
+		AnalyseProcess.donorName = donorName;
+		AnalyseProcess.acceptorName = acceptorName;
 	}
 	
 	public void run() {
@@ -1927,80 +1992,7 @@ class AnalyseProcess implements Runnable, ActionListener, TextListener, ItemList
 				impIndex++;
 			}
 			if (getRM(true).getCount() > 0) {
-				// Init variables
-				totROIs = nbROIs[nbROIs.length-1];
-				int[] nSlices = new int[totROIs];
-				int[] imageID = new int[totROIs];
-				double[][] results = new double[2*totROIs][maxSlices];
-				double[] meanLinePlot = new double[maxSlices];
-				double[] stdDevLinePlot = new double[maxSlices];
-				double[] timingPlot = new double[maxSlices];
-				int roiIndex = 0;
-				int[] tagIndexes = new int[totROIs];
-				int[] imgROIIndexes = new int[totROIs];
-				int nbTags = tagListModel.getSize();
-				String[] shortTags = getShortTags();
-				rt = new ResultsTable[nbTags+1];
-				String titleCol;
-				for (int i = 0; i < nbTags+1; i++) {
-					rt[i] = new ResultsTable();
-					rt[i].setPrecision(6);
-					rt[i].showRowNumbers(false);
-				}
-				impIndex = 0;
-				// Do measures
-				for (final ImagePlus imp : impList) {
-					LUT lut = imp.getProcessor().getLut();
-					imp.getProcessor().setThreshold(0.01, 65535, ImageProcessor.NO_LUT_UPDATE);
-					for (; roiIndex < nbROIs[impIndex+1]; roiIndex++) {
-						tagIndexes[roiIndex] = getTagIndex(getRM(true).getName(roiIndex));
-						imgROIIndexes[roiIndex] = roiIndex-nbROIs[impIndex]+1;
-						getRM(true).select(imp, roiIndex);
-						nSlices[roiIndex] = imp.getNSlices();
-						imageID[roiIndex] = impIndex+1;
-						for (int i = 0; i < nSlices[roiIndex]; i++) {
-							imp.setSliceWithoutUpdate(i+1);
-							istat = imp.getStatistics(ImageStatistics.MEAN+ImageStatistics.STD_DEV+ImageStatistics.LIMIT);
-							results[roiIndex][i] = istat.mean;
-							results[roiIndex+totROIs][i] = istat.stdDev;
-						}
-					}
-					imp.getProcessor().setLut(lut); // forced to set back LUT because setThreshold started removing it in ImageJ 1.52e.
-					// and pushed after the measurements, because setLUT cancels the setThreshold...
-					impIndex++;
-				}
-				// Save results in files
-				if (period_sec == 0) {
-					IJ.showStatus("Select txt file containing timings in seconds, one value per line, no header");
-					od = new OpenDialog("Select txt file containing timings in seconds, one value per line, no header");
-					String path = od.getPath();
-					String[] timings = IJ.openAsString(path).split("\n");
-					for (int slice = 0; slice < Math.min(maxSlices, timings.length); slice++) {
-						for (int i = 0; i <= nbTags; i++) {
-							rt[i].setValue("t(mn)", slice, Double.parseDouble(timings[slice])/60);
-						}
-					}
-				} else {
-					for (int slice = 0; slice < maxSlices; slice++) {
-						for (int i = 0; i <= nbTags; i++) {
-							rt[i].setValue("t(mn)", slice, slice*period_sec/60);
-						}
-					}
-				}
-				for (int col = 0; col < totROIs; col++) {
-					titleCol = "mean"+imageID[col]+shortTags[tagIndexes[col]]+imgROIIndexes[col];
-					for (int slice = 0; slice < nSlices[col]; slice++) {
-						rt[nbTags].setValue(titleCol, slice, results[col][slice]);
-						rt[tagIndexes[col]].setValue(titleCol, slice, results[col][slice]); // add to tag specific table or overwrite if no tag
-					}
-				}
-				for (int col = 0; col < totROIs; col++) {
-					titleCol = "sd"+imageID[col]+shortTags[tagIndexes[col]]+imgROIIndexes[col];
-					for (int slice = 0; slice < nSlices[col]; slice++) {
-						rt[nbTags].setValue(titleCol, slice, results[col+totROIs][slice]);
-						rt[tagIndexes[col]].setValue(titleCol, slice, results[col+totROIs][slice]); // add to tag specific table or overwrite if no tag
-					}
-				}
+				// Prepare results folder
 				String resultsFolder = savePaths();
 				File f = new File(resultsFolder);
 				if (f.exists()) {
@@ -2018,18 +2010,188 @@ class AnalyseProcess implements Runnable, ActionListener, TextListener, ItemList
 					resultsFolder = savePaths();
 					f = new File(resultsFolder);
 				}
+				// Init variables
+				totROIs = nbROIs[nbROIs.length-1];
+				int[] nSlices = new int[totROIs];
+				int[] imageID = new int[totROIs];
+				double[][] results = new double[2*totROIs][maxSlices];
+				double[][] results2 = new double[2*totROIs][maxSlices];
+				double[] meanLinePlot = new double[maxSlices];
+				double[] stdDevLinePlot = new double[maxSlices];
+				double[] timingPlot = new double[maxSlices];
+				int roiIndex;
+				int[] tagIndexes = new int[totROIs];
+				int[] imgROIIndexes = new int[totROIs];
+				int nbTags = tagListModel.getSize();
+				String[] shortTags = getShortTags();
+				rt = new ResultsTable[nbTags+1];
+				rt2 = new ResultsTable[nbTags+1];
+				String titleCol,titleCol2;
+				for (int i = 0; i < nbTags+1; i++) {
+					rt[i] = new ResultsTable();
+					rt[i].setPrecision(6);
+					rt[i].showRowNumbers(false);
+					rt2[i] = new ResultsTable();
+					rt2[i].setPrecision(6);
+					rt2[i].showRowNumbers(false);
+				}
+				// recover timings
+				if (period_sec == 0) {
+					IJ.showStatus("Select txt file containing timings in seconds, one value per line");
+					od = new OpenDialog("Select txt file containing timings in seconds, one value per line");
+					String path = od.getPath();
+					if (path == null) { // Dialog canceled
+						IJ.log("Timings file dialog selection cancelled -> Do analysis cancelled.");
+						return;
+					}
+					String[] timings = IJ.openAsString(path).split("\n");
+					int offset = 0;
+					for (int slice = 0; slice < Math.min(maxSlices+offset, timings.length); slice++) {
+						try {
+							Double.parseDouble(timings[slice]);
+						} catch(NumberFormatException e) {
+							offset++;
+							continue;
+						}
+						for (int i = 0; i <= nbTags; i++) {
+							rt[i].setValue("t(mn)", slice-offset, Double.parseDouble(timings[slice])/60);
+							rt2[i].setValue("t(mn)", slice-offset, Double.parseDouble(timings[slice])/60);
+						}
+					}
+				} else {
+					for (int slice = 0; slice < maxSlices; slice++) {
+						for (int i = 0; i <= nbTags; i++) {
+							rt[i].setValue("t(mn)", slice, slice*period_sec/60);
+							rt2[i].setValue("t(mn)", slice, slice*period_sec/60);
+						}
+					}
+				}
+				impIndex = 0;
+				// Do measures
+				double thMin = 0.01, thMax = 65535;
+				for (final ImagePlus imp : impList) {
+					LUT lut = imp.getProcessor().getLut();
+					imp.getProcessor().setThreshold(thMin, thMax, ImageProcessor.NO_LUT_UPDATE);
+					
+					// Measure mean and sd of ratios
+					IJ.run("Set Measurements...", "mean standard limit redirect=None decimal=3");
+					ResultsTable rtx = ResultsTable.getResultsTable();
+					for (roiIndex = 0; roiIndex < nbROIs[impIndex+1]; roiIndex++) {
+						tagIndexes[roiIndex] = getTagIndex(getRM(true).getName(roiIndex));
+						imgROIIndexes[roiIndex] = roiIndex-nbROIs[impIndex]+1;
+						getRM(true).select(imp, roiIndex);
+						nSlices[roiIndex] = imp.getNSlices();
+						imageID[roiIndex] = impIndex+1;
+						for (int i = 0; i < nSlices[roiIndex]; i++) {
+							imp.setSliceWithoutUpdate(i+1);
+							IJ.run(imp, "Measure", "");
+							results[roiIndex][i] = rtx.getValue("Mean", rtx.size()-1);
+							results[roiIndex+totROIs][i] = rtx.getValue("StdDev", rtx.size()-1);
+						}
+					}
+					imp.getProcessor().setLut(lut); // forced to set back LUT because setThreshold started removing it in ImageJ 1.52e.
+					// and pushed after the measurements, because setLUT cancels the setThreshold...
+					
+					// Measure ratio of means and nPixels
+					String[] donorAcceptor = ratioToDonorAcceptor(imageList.getItem(impIndex));
+					File f1 = new File(donorAcceptor[0]), f2 = new File(donorAcceptor[1]);
+					boolean measureRatioOfMeans = f1.exists() && f2.exists();
+					if (measureRatioOfMeans) {
+						IJ.run("Set Measurements...", "mean integrated redirect=None decimal=3");
+						imp.killRoi();
+						ImagePlus mask = imp.duplicate(), donorImp, acceptorImp;
+						ImageProcessor ip1, ip2;
+						float value;
+						int width = mask.getWidth();
+				        int height = mask.getHeight();
+						int size = width*height;
+						ImageStack stack1 = mask.getStack();
+						ImageStack stack2 = new ImageStack(width, height);
+				        for (int i=1; i<=mask.getNSlices(); i++) {
+				            IJ.showProgress(i, mask.getNSlices());
+				            String label = stack1.getSliceLabel(i);
+				            ip1 = stack1.getProcessor(i);
+				            ip2 = new ByteProcessor(width, height);
+				            for (int j=0; j<size; j++) {
+				                value = ip1.getf(j);
+				                if (value>=thMin && value<=thMax)
+				                    ip2.set(j, 1);
+				                else
+				                    ip2.set(j, 0);
+				            }
+				            stack2.addSlice(label, ip2);
+				        }
+				        mask.setStack(null, stack2);
+				        donorImp = IJ.openImage(donorAcceptor[0]);
+				        ic.run("Multiply stack", donorImp, mask);
+				        acceptorImp = IJ.openImage(donorAcceptor[1]);
+				        ic.run("Multiply stack", acceptorImp, mask);
+				        double intDenDonor, intDenAcceptor, intDenMask;
+				        for (roiIndex = 0; roiIndex < nbROIs[impIndex+1]; roiIndex++) {
+				        	getRM(true).select(donorImp, roiIndex);
+				        	getRM(true).select(acceptorImp, roiIndex);
+				        	getRM(true).select(mask, roiIndex);
+				        	for (int i = 0; i < nSlices[roiIndex]; i++) {
+				        		donorImp.setSliceWithoutUpdate(i+1);
+				        		IJ.run(donorImp, "Measure", "");
+				        		intDenDonor = rtx.getValue("IntDen", rtx.size()-1);
+				        		acceptorImp.setSliceWithoutUpdate(i+1);
+				        		IJ.run(acceptorImp, "Measure", "");
+				        		intDenAcceptor = rtx.getValue("IntDen", rtx.size()-1);
+				        		mask.setSliceWithoutUpdate(i+1);
+				        		IJ.run(mask, "Measure", "");
+				        		intDenMask = rtx.getValue("IntDen", rtx.size()-1);
+				        		results2[roiIndex][i] = intDenAcceptor / intDenDonor;
+								results2[roiIndex+totROIs][i] = intDenMask;
+				        	}
+				        }
+				        donorImp.changes = false;
+				        donorImp.close();
+				        acceptorImp.changes = false;
+				        acceptorImp.close();
+				        mask.close();
+					}
+					impIndex++;
+				}
+		        ResultsTable.getResultsWindow().close(false);
+				// Save results in files
+				for (int col = 0; col < totROIs; col++) {
+					titleCol = "mean"+imageID[col]+shortTags[tagIndexes[col]]+imgROIIndexes[col];
+					for (int slice = 0; slice < nSlices[col]; slice++) {
+						rt[nbTags].setValue(titleCol, slice, results[col][slice]);
+						rt[tagIndexes[col]].setValue(titleCol, slice, results[col][slice]); // add to tag specific table or overwrite if no tag
+						rt2[nbTags].setValue(titleCol, slice, results2[col][slice]);
+						rt2[tagIndexes[col]].setValue(titleCol, slice, results2[col][slice]); // add to tag specific table or overwrite if no tag
+					}
+				}
+				for (int col = 0; col < totROIs; col++) {
+					titleCol = "sd"+imageID[col]+shortTags[tagIndexes[col]]+imgROIIndexes[col];
+					titleCol2 = "area"+imageID[col]+shortTags[tagIndexes[col]]+imgROIIndexes[col];
+					for (int slice = 0; slice < nSlices[col]; slice++) {
+						rt[nbTags].setValue(titleCol, slice, results[col+totROIs][slice]);
+						rt[tagIndexes[col]].setValue(titleCol, slice, results[col+totROIs][slice]); // add to tag specific table or overwrite if no tag
+						rt2[nbTags].setValue(titleCol2, slice, results2[col+totROIs][slice]);
+						rt2[tagIndexes[col]].setValue(titleCol2, slice, results2[col+totROIs][slice]); // add to tag specific table or overwrite if no tag
+					}
+				}
 				if (!f.exists()) {f.mkdirs();}
-				rt[nbTags].save(resultsFolder+dataFolderName+".csv");
-				rt[nbTags].save(resultsFolder+dataFolderName+".xls");
+				rt[nbTags].save(resultsFolder+dataFolderName+"_MeanOfRatios.csv");
+				rt[nbTags].save(resultsFolder+dataFolderName+"_MeanOfRatios.xls");
+				rt2[nbTags].save(resultsFolder+dataFolderName+"_RatioOfMeans.csv");
+				rt2[nbTags].save(resultsFolder+dataFolderName+"_RatioOfMeans.xls");
 				ImageWindow.setNextLocation((int)resultsPosX, (int)resultsPosY);
-				rt[nbTags].show("Analyse results");
-				resultsWin = WindowManager.getWindow("Analyse results");
+				rt[nbTags].show("Analyse results means of ratio");
+				ImageWindow.setNextLocation((int)resultsPosX, (int)resultsPosY);
+				rt2[nbTags].show("Analyse results ratio of means");
+				resultsWin = WindowManager.getWindow("Analyse results means of ratio");
 				resultsWin.setVisible(true);
 				resultsWin.addWindowListener(this);
 				for (int i = 0; i < nbTags; i++) {
 					if (rt[i].getLastColumn() > 1) {
-						rt[i].save(resultsFolder+dataFolderName+"_"+tagListModel.getElementAt(i)+".csv");
-						rt[i].save(resultsFolder+dataFolderName+"_"+tagListModel.getElementAt(i)+".xls");
+						rt[i].save(resultsFolder+dataFolderName+"_"+tagListModel.getElementAt(i)+"_MeanOfRatios.csv");
+						rt[i].save(resultsFolder+dataFolderName+"_"+tagListModel.getElementAt(i)+"_MeanOfRatios.xls");
+						rt2[i].save(resultsFolder+dataFolderName+"_"+tagListModel.getElementAt(i)+"_RatioOfMeans.csv");
+						rt2[i].save(resultsFolder+dataFolderName+"_"+tagListModel.getElementAt(i)+"_RatioOfMeans.xls");
 					}
 				}
 				// Display plots
@@ -2680,6 +2842,19 @@ class AnalyseProcess implements Runnable, ActionListener, TextListener, ItemList
 			rm = RoiManager.getRoiManager();
 		}
 		return rm;
+	}
+	
+ 	public static String[] ratioToDonorAcceptor(String filePath) {
+ 		String[] strRes = new String[2];
+		File file = new File(filePath);
+		String parentFolder = file.getParent()+File.separator;
+		String fileName = file.getName();
+		int index = fileName.lastIndexOf("Ratio");
+		if (index != -1) {
+			strRes[0] = parentFolder+fileName.substring(0, index)+donorName+fileName.substring(index+5, fileName.length()-4)+"_clean.tif";
+			strRes[1] = parentFolder+fileName.substring(0, index)+acceptorName+fileName.substring(index+5, fileName.length()-4)+"_clean.tif";
+		}
+		return strRes;
 	}
  	
 	public void windowOpened(WindowEvent e) {}

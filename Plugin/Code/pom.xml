@@ -2,12 +2,12 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>org.scijava</groupId>
   <artifactId>BRET_Analyzer</artifactId>
-  <version>1.0.7</version>
+  <version>1.0.8</version>
   <dependencies>
   	<dependency>
   		<groupId>net.imagej</groupId>
   		<artifactId>ij</artifactId>
-  		<version>1.52i</version>
+  		<version>1.53t</version>
   	</dependency>
   </dependencies>
   <properties>

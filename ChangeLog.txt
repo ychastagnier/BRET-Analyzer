@@ -1,0 +1,9 @@
+Plugin v1.0.7 -> v1.0.8
+- Version added to the title of the main window: BRET Analyzer (v1.0.8), instead of just: BRET Analyzer.
+- Preview of division has now three states: No preview, Single slice preview, Stack preview (adjusting parameters with preview on a huge stack is pretty slow so single slice preview will help greatly in that case).
+- After division, replaced values outside the range [0.01, 1000] by NaN. No more Infinities making the image white on some computer and possibility to explore the image with Plot Z Axis profile without worrying about 0 valued pixels.
+- In divide AutoThreshold Otsu and AutoLocalThreshold methods, mask image is first converted to 8bits, potentially losing precision. In that case, values of all images were redistributed based on the histogram of the first image. Each image is now redistributed based on its own histogram. It should give more stable results when the intensity in the stack changes a lot with time.
+- Timings file selection cancelation no longer throws an error, but instead displays the log message "Timings file dialog selection cancelled -> Do analysis cancelled.".
+- Timings file can now have a header which will be skipped.
+- Do analysis now also works with line and polyline ROIs.
+- Do analysis also outputs Ratio of means in addition to Means of ratios. It should give more reliable results in small ROIs, although it might by highly sensitive to hotspots.
