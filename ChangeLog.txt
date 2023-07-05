@@ -1,3 +1,6 @@
+Plugin v1.0.8 -> v1.0.9
+- Fixed "Do analysis" behaving incorrectly when more than one ratio image was opened in Analyse window. Last image was overwritting results of all previous images with incorrect values.
+
 Plugin v1.0.7 -> v1.0.8
 - Version added to the title of the main window: BRET Analyzer (v1.0.8), instead of just: BRET Analyzer.
 - Preview of division has now three states: No preview, Single slice preview, Stack preview (adjusting parameters with preview on a huge stack is pretty slow so single slice preview will help greatly in that case).

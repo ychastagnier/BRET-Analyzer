@@ -158,7 +158,7 @@ class BRETAnalyzerProcess implements ActionListener, WindowListener {
 	
 	public void getFrame() {
 		if (frame == null) {
-			frame = new Frame("BRET Analyzer (v1.0.8)");
+			frame = new Frame("BRET Analyzer (v1.0.9)");
 			donorName = Prefs.get("BRETa.donorName", "LUC");
 			acceptorName = Prefs.get("BRETa.acceptorName", "YFP");
 			cleanParms = new CleanParameters();
@@ -2076,7 +2076,7 @@ class AnalyseProcess implements Runnable, ActionListener, TextListener, ItemList
 					// Measure mean and sd of ratios
 					IJ.run("Set Measurements...", "mean standard limit redirect=None decimal=3");
 					ResultsTable rtx = ResultsTable.getResultsTable();
-					for (roiIndex = 0; roiIndex < nbROIs[impIndex+1]; roiIndex++) {
+					for (roiIndex = nbROIs[impIndex]; roiIndex < nbROIs[impIndex+1]; roiIndex++) {
 						tagIndexes[roiIndex] = getTagIndex(getRM(true).getName(roiIndex));
 						imgROIIndexes[roiIndex] = roiIndex-nbROIs[impIndex]+1;
 						getRM(true).select(imp, roiIndex);
@@ -2127,7 +2127,7 @@ class AnalyseProcess implements Runnable, ActionListener, TextListener, ItemList
 				        acceptorImp = IJ.openImage(donorAcceptor[1]);
 				        ic.run("Multiply stack", acceptorImp, mask);
 				        double intDenDonor, intDenAcceptor, intDenMask;
-				        for (roiIndex = 0; roiIndex < nbROIs[impIndex+1]; roiIndex++) {
+				        for (roiIndex = nbROIs[impIndex]; roiIndex < nbROIs[impIndex+1]; roiIndex++) {
 				        	getRM(true).select(donorImp, roiIndex);
 				        	getRM(true).select(acceptorImp, roiIndex);
 				        	getRM(true).select(mask, roiIndex);
